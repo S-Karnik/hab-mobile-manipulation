@@ -40,6 +40,19 @@ class CategoricalNet(nn.Module):
         x = self.linear(x)
         return CustomFixedCategorical(logits=x)
 
+class ClassifierNet(nn.Module):
+    def __init__(self, num_inputs, hidden_sizes) -> None:
+        super().__init__()
+        self.mlp = MLP(num_inputs, hidden_sizes).orthogonal_()
+        self.linear = nn.Linear(self.mlp.output_size, 1)
+        self.sigmoid = nn.Sigmoid()
+        nn.init.orthogonal_(self.linear.weight, gain=0.01)
+        nn.init.constant_(self.linear.bias, 0)
+
+    def forward(self, x: torch.Tensor):
+        x = self.mlp(x)
+        x = self.linear(x)
+        return self.sigmoid(x)
 
 class GaussianNet(nn.Module):
     def __init__(

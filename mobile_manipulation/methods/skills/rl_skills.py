@@ -32,6 +32,7 @@ class RLSkill(Skill):
         action_space = self._action_space[self._config.ACTION]
         policy_config = ckpt_config.RL["POLICY" + skill_idx]
         policy = baseline_registry.get_policy(policy_config.name)
+        # import pdb; pdb.set_trace()
         actor_critic: ActorCritic = policy.from_config(
             policy_config, self._obs_space, action_space
         )

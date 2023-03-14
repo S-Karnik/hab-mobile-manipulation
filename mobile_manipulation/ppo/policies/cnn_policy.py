@@ -215,7 +215,7 @@ class CRNet(Net):
         )
         state_embed = self.state_encoder(state_input)
 
-        features = torch.cat([perception_embed, state_embed], dim=1)
+        features = torch.cat([perception_embed, state_embed], dim=1).float()
         outputs = dict(features=features)
 
         if self.rnn_encoder is not None:
