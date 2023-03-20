@@ -56,7 +56,7 @@ class MyHabitatSimSemanticSensor(HabitatSimSemanticSensor):
 class RearrangeSim(HabitatSim):
     robot: FetchRobot
 
-    RIGID_OBJECT_DIR = "data/objects/ycb"
+    RIGID_OBJECT_DIR = "data/objects/ycb/configs"
     PRIMITIVE_DIR = "habitat_extensions/assets/objects/primitives"
 
     def __init__(self, config: Config):
@@ -186,6 +186,7 @@ class RearrangeSim(HabitatSim):
             template_handle = osp.join(self.RIGID_OBJECT_DIR, obj_info[0])
             obj = rigid_obj_mgr.add_object_by_template_handle(template_handle)
             T = mn.Matrix4(np.array(obj_info[1]))
+            # import pdb; pdb.set_trace()
             # obj.transformation = T
             obj.transformation = mn_utils.orthogonalize(T)
             obj.motion_type = MotionType.DYNAMIC

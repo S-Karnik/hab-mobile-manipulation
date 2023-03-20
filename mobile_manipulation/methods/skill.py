@@ -112,15 +112,15 @@ class CompositeSkill(Skill):
 
     def reset(self, obs, **kwargs):
         self.set_skill_idx(0)
-        print("Skill <{}> begin.".format(self.current_skill_name))
+        # print("Skill <{}> begin.".format(self.current_skill_name))
         self.current_skill.reset(obs, **kwargs)
 
     def act(self, obs, **kwargs):
         if self.current_skill.should_terminate(obs, **kwargs):
-            print("Skill <{}> terminate.".format(self.current_skill_name))
+            # print("Skill <{}> terminate.".format(self.current_skill_name))
             self.set_skill_idx(None)
             if self.current_skill is not None:
-                print("Skill <{}> begin.".format(self.current_skill_name))
+                # print("Skill <{}> begin.".format(self.current_skill_name))
                 self.current_skill.reset(obs, **kwargs)
 
         if self.current_skill is not None:

@@ -29,6 +29,7 @@ import pickle
 from gym import spaces
 
 from tqdm import tqdm
+import random
 
 def preprocess_config(config_path: str, config: Config):
     config.defrost()
@@ -215,22 +216,6 @@ def main():
     if args.num_episodes is not None:
         num_episodes = args.num_episodes
 
-    done, info = True, {}
-    all_episode_stats = []
-    episode_reward = 0
-    failure_episodes = []
-
-    if args.save_video is not None:
-        os.makedirs(config.VIDEO_DIR, exist_ok=True)
-    rgb_frames = []
-
-    if args.viewer:
-        viewer = OpenCVViewer(config.TASK_CONFIG.TASK.TYPE)
-
-    ob_trajectories = []
-    next_skill_fails = []
-    max_num_traj = 100
-    
     relevant_ob_keys = ["robot_head_depth", "nav_goal_at_base"]
     skill_ordering = []
     for s in policy.skills:
@@ -244,108 +229,30 @@ def main():
     # Recompute obs space with new next_skill observation
     new_obs_space_dict = env.observation_space.spaces.copy()
     new_obs_space_dict["next_skill"] = spaces.Box(0, 1, (len(skill_ordering),), np.int32)
-    new_obs_space_dict["goal"] = spaces.Box(-np.inf, np.inf, (3,), np.int32)
+    new_obs_space_dict["goal"] = spaces.Box(-np.inf, np.inf, (3,), np.float32)
     new_observation_space = spaces.Dict(new_obs_space_dict)
 
-    # Compute config stages and aliases
-    config_stages = list(config.TASK_CONFIG.TASK.StageSuccess.GOALS.keys())
-    config_stage_aliases = [s for s in policy.skill_sequence if (not is_navigate(s)) and (not is_reset_arm(s)) and (not is_next_target(s))]
-    config_stage_alias_dict = {config_stage_aliases[i]: config_stages[i] for i in range(len(config_stage_aliases))}
-
-    # reload = True
-    # belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, num_epochs_per_update=args.num_epochs_per_update, reload=reload)
-    for i_ep in tqdm(range(num_episodes)):
-        ob = env.reset()
-        policy.reset(ob)
-
-        episode_reward = 0.0
-        info = {}
-        episode_id = env.current_episode.episode_id
-
-        # Skip episode and keep reproducibility
-        if eval_episode_ids is not None and episode_id not in eval_episode_ids:
-            print("Skip episode", episode_id)
-            continue
-        current_skill = None
-        current_skills = []
-        post_nav_skills = []
-        while True:
-            if current_skill != policy.current_skill_name: 
-                if is_navigate(policy.current_skill_name):
-                    ob_trajectories.append([])
-                    post_nav_skills.append(None)
-
-                if not is_reset_arm(current_skill):
-                    prev_skill = current_skill
-                current_skill = policy.current_skill_name
-                current_skills.append(current_skill)
-
-            if is_navigate(prev_skill) and not is_reset_arm(current_skill):
-                post_nav_skills[-1] = current_skill
-            
-            if is_navigate(policy.current_skill_name):
-                old_ob = {k: ob[k] for k in relevant_ob_keys}
-                old_ob["next_skill"] = skill_ordering_dict[policy.skill_sequence[policy._skill_idx + 2]]
-                old_ob["goal"] = get_goal_position(env)
-                ob_trajectories[-1].append(old_ob)
-                
-            step_action = policy.act(ob)
-
-            if step_action is None:
-                break
-
-            ob, reward, done, info = env.step(step_action)
-                
-            episode_reward += reward
-            if done:
-                break
-        
-        next_skill_fails += [not info["stage_success"][config_stage_alias_dict[s]] for s in post_nav_skills]
-        # -------------------------------------------------------------------------- #
-        # Update stats
-        # -------------------------------------------------------------------------- #
-        metrics = extract_scalars_from_info(info)
-        episode_stats = metrics.copy()
-        episode_stats["return"] = episode_reward
-        all_episode_stats.append(episode_stats)
-
-        success = metrics.get(config.RL.SUCCESS_MEASURE, -1)
-        is_failure = success == False
-
-        if is_failure:
-            failure_episodes.append(episode_id)
-
-        if eval_episode_ids is not None:
-            if len(all_episode_stats) >= len(eval_episode_ids):
-                print("Completed")
-                break
-
-        if i_ep % max_num_traj == 0:
-            # belief_classifier.train_failure_belief_classifier(ob_trajectories, next_skill_fails)
-            saved_data = dict(ob_trajectories=ob_trajectories, next_skill_fails=next_skill_fails)
-            with open(f"mobile_manipulation/goal_failure_belief/belief_train_data/saved_traj_{i_ep}.pkl", "wb") as f:
-                pickle.dump(saved_data, f)
-            ob_trajectories = []
-            next_skill_fails = []
-
+    reload = True
+    belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, reload=reload)
+    num_epochs = 10000
+    base_file_path = "mobile_manipulation/goal_failure_belief/belief_train_data/"
+    proc_base_file_path = "mobile_manipulation/goal_failure_belief/belief_train_proc_data/"
+    saved_traj_dir = sorted(os.listdir(base_file_path))
+    import time
+    for epoch in tqdm(range(num_epochs)):
+        sampled_list = random.sample(saved_traj_dir[:-1], len(saved_traj_dir)-1)
+        for i in range(len(sampled_list)):
+            fname = sampled_list[i]
+            with open(os.path.join(base_file_path, fname), "rb") as f:
+                saved_data = pickle.load(f)
+            # import pdb; pdb.set_trace()
+            belief_classifier.train_failure_belief_classifier(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
+        fname = saved_traj_dir[-1]
+        with open(os.path.join(base_file_path, fname), "rb") as f:
+            saved_data = pickle.load(f)
+        belief_classifier.eval_model(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
+        belief_classifier.save_train_info(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
     env.close()
-
-    # logging metrics
-    aggregated_stats = {
-        k: np.mean([ep_info[k] for ep_info in all_episode_stats])
-        for k in all_episode_stats[0].keys()
-    }
-    for k, v in aggregated_stats.items():
-        logger.info(f"Average episode {k}: {v:.4f}")
-
-    failure_episodes = sorted(failure_episodes)
-    failure_episodes_str = ",".join(map(str, failure_episodes))
-    logger.info("Failure episodes:\n{}".format(failure_episodes_str))
-
-    if args.save_log:
-        json_path = config.LOG_FILE.replace("log.txt", "result.json")
-        with open(json_path, "w") as f:
-            json.dump(all_episode_stats, f, indent=2)
 
 
 if __name__ == "__main__":

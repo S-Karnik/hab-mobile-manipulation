@@ -15,10 +15,10 @@ class FailureBeliefModel(nn.Module):
             use_prev_actions=False,
             rgb_uuids = [],
             depth_uuids = ["robot_head_depth"], 
-            state_uuids = ["nav_goal_at_base", "next_skill"],
+            state_uuids = ["nav_goal_at_base", "next_skill", "goal"],
             hidden_size = 512,
             state_hidden_sizes = [],
-            rnn_hidden_size = 512
+            rnn_hidden_size = 512,
         )
         self._failure_predictor = ClassifierNet(
             num_inputs=self._crnn.output_size,

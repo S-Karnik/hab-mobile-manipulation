@@ -3,7 +3,7 @@ BASE_RUN_DIR: "data/results/rearrange/skills/set_table/{fileName}"
 
 TASK_CONFIG:
   DATASET:
-    DATA_PATH: "data/datasets/rearrange/v3/set_table_220417_{split}.json.gz"
+    DATA_PATH: "data/datasets/rearrange/set_table_220417_{split}.json.gz"
 
 TRAINER_NAME: "ppo-v0"
 ENV_NAME: "RearrangeRLEnv-v0"

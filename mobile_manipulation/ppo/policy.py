@@ -10,6 +10,7 @@ from habitat_baselines.utils.common import CustomFixedCategorical, CustomNormal
 from torch.distributions import Distribution
 
 from mobile_manipulation.utils.nn_utils import MLP
+from habitat_baselines.il.models.models import build_mlp
 
 
 class Net(nn.Module):
@@ -45,13 +46,14 @@ class ClassifierNet(nn.Module):
         super().__init__()
         self.mlp = MLP(num_inputs, hidden_sizes).orthogonal_()
         self.linear = nn.Linear(self.mlp.output_size, 1)
+        self.lin_seq = nn.Sequential(self.linear, nn.Dropout(p=0.5))
         self.sigmoid = nn.Sigmoid()
         nn.init.orthogonal_(self.linear.weight, gain=0.01)
         nn.init.constant_(self.linear.bias, 0)
 
     def forward(self, x: torch.Tensor):
-        x = self.mlp(x)
-        x = self.linear(x)
+        # x = self.mlp(x)
+        x = self.lin_seq(x)
         return self.sigmoid(x)
 
 class GaussianNet(nn.Module):

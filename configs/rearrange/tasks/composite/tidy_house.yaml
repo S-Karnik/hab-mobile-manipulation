@@ -1,7 +1,7 @@
 __BASE__: "{fileDirname}/../base.yaml"
 
 DATASET:
-  DATA_PATH: "data/datasets/rearrange/v3/tidy_house_220417_{split}.json.gz"
+  DATA_PATH: "data/datasets/rearrange/tidy_house_220417_{split}.json.gz"
 
 ENVIRONMENT:
   MAX_EPISODE_STEPS: 5000

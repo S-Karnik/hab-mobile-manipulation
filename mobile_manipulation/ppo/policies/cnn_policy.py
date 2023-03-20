@@ -74,6 +74,7 @@ class CRNet(Net):
         state_hidden_sizes: List[int],
         rnn_hidden_size: int,
         use_prev_actions=False,
+        rnn_type="gru"
     ) -> None:
         super().__init__()
 
@@ -115,7 +116,7 @@ class CRNet(Net):
 
         if rnn_hidden_size > 0:
             self.rnn_encoder = build_rnn_state_encoder(
-                self.output_size, rnn_hidden_size
+                self.output_size, rnn_hidden_size, rnn_type=rnn_type
             )
             self.output_size = rnn_hidden_size
             self.rnn_hidden_size = rnn_hidden_size

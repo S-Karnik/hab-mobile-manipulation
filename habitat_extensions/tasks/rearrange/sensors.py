@@ -43,8 +43,8 @@ class PositionSensor(MySensor):
         raise NotImplementedError()
 
     def get_observation(self, *args, task: RearrangeTask, **kwargs):
-        position = self._get_world_position(*args, task=task, **kwargs)
-        position = mn.Vector3(position)
+        world_position = self._get_world_position(*args, task=task, **kwargs)
+        position = mn.Vector3(world_position)
 
         robot = self._sim.robot
         frame = self.config.get("FRAME", "world")

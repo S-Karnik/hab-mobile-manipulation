@@ -3,7 +3,7 @@ BASE_RUN_DIR: "data/results/rearrange/skills/prepare_groceries/{fileName}"
 
 TASK_CONFIG:
   DATASET:
-    DATA_PATH: "data/datasets/rearrange/v3/prepare_groceries_220417_{split}.json.gz"
+    DATA_PATH: "data/datasets/rearrange/prepare_groceries_220417_{split}.json.gz"
   TASK:
     FRIDGE_INIT: True
 

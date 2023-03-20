@@ -37,6 +37,7 @@ class TidyHouseTask(RearrangeTask):
         self.set_target(tgt_idx)
 
     def set_target(self, index):
+        # import pdb; pdb.set_trace()
         self.tgt_idx = index
         self.tgt_obj, self.tgt_T = self._sim.get_target(self.tgt_idx)
         self.pick_goal = self.obj_start_pos[self.tgt_obj.handle]

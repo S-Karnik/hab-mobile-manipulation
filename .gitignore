@@ -34,3 +34,10 @@ imgui.ini
 
 # Project
 /data
+
+**/belief_train_data/
+**/belief_train_proc_data/
+
+*.err
+*.out
+*0.pt

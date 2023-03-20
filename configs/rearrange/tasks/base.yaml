@@ -136,6 +136,6 @@ TASK:
 DATASET:
   TYPE: RearrangeDataset-v0
   SPLIT: "train"
-  DATA_PATH: "data/datasets/rearrange/v3/tidy_house_220417_{split}.json.gz"
+  DATA_PATH: "data/datasets/rearrange/tidy_house_220417_{split}.json.gz"
   EPISODE_IDS: []
   NUM_EPISODES: -1
