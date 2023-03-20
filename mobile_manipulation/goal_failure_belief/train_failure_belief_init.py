@@ -20,7 +20,7 @@ class TrainBeliefClassifier:
         self._belief_model = FailureBeliefModel(observation_space, action_space).to(device)
         self._observation_space = observation_space
         self._device = device
-        self._optimizer = optim.Adam(self._belief_model.parameters(), lr=lr, weight_decay=1e-6)
+        self._optimizer = optim.SGD(self._belief_model.parameters(), lr=lr, momentum=0.9, weight_decay=1e-6)
         current_file_path = os.path.abspath(__file__)
         parent_dir = os.path.abspath(os.path.join(current_file_path, os.pardir))
         self._writer = SummaryWriter(os.path.join(parent_dir, 'logs'))
