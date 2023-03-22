@@ -232,24 +232,13 @@ def main():
     new_observation_space = spaces.Dict(new_obs_space_dict)
 
     reload = True
-    belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, reload=reload)
+    belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, reload=reload, runtype="toy")
     num_epochs = 10000
-    base_file_path = "mobile_manipulation/goal_failure_belief/belief_train_data/"
-    proc_base_file_path = "mobile_manipulation/goal_failure_belief/belief_train_proc_data/"
-    saved_traj_dir = sorted(os.listdir(base_file_path))
-    import time
+    fname = "mobile_manipulation/goal_failure_belief/toy_belief_train_data/saved_traj_49.pkl"
     for epoch in tqdm(range(num_epochs)):
-        sampled_list = random.sample(saved_traj_dir[:-1], len(saved_traj_dir)-1)
-        for i in range(len(sampled_list)):
-            fname = sampled_list[i]
-            with open(os.path.join(base_file_path, fname), "rb") as f:
-                saved_data = pickle.load(f)
-            # import pdb; pdb.set_trace()
-            belief_classifier.train_failure_belief_classifier(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
-        fname = saved_traj_dir[-1]
-        with open(os.path.join(base_file_path, fname), "rb") as f:
+        with open(fname, "rb") as f:
             saved_data = pickle.load(f)
-        belief_classifier.save_train_info(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
+        belief_classifier.train_failure_belief_classifier(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
     env.close()
 
 
