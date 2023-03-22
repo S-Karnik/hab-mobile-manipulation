@@ -231,7 +231,7 @@ def main():
     new_obs_space_dict["goal"] = spaces.Box(-np.inf, np.inf, (3,), np.float32)
     new_observation_space = spaces.Dict(new_obs_space_dict)
 
-    reload = True
+    reload = False
     belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, reload=reload, runtype="toy")
     num_epochs = 10000
     fname = "mobile_manipulation/goal_failure_belief/toy_belief_train_data/saved_traj_49.pkl"
