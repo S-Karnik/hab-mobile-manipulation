@@ -16,18 +16,18 @@ MAX_STEPS = 600
 
 class TrainBeliefClassifier:
 
-    def __init__(self, observation_space, action_space, device, prefix, lr=3e-4, reload=False, max_grad_norm=0.2, size_batch_sub_trajs=32) -> None:
+    def __init__(self, observation_space, action_space, device, prefix, lr=3e-4, reload=False, max_grad_norm=0.2, size_batch_sub_trajs=32, runtype="") -> None:
         self._belief_model = FailureBeliefModel(observation_space, action_space).to(device)
         self._observation_space = observation_space
         self._device = device
-        self._optimizer = optim.SGD(self._belief_model.parameters(), lr=lr, momentum=0.9, weight_decay=1e-6)
+        self._optimizer = optim.Adam(self._belief_model.parameters(), lr=lr, eps=1e-5)
         current_file_path = os.path.abspath(__file__)
         parent_dir = os.path.abspath(os.path.join(current_file_path, os.pardir))
-        self._writer = SummaryWriter(os.path.join(parent_dir, 'logs'))
+        self._writer = SummaryWriter(os.path.join(parent_dir, f'{runtype}logs'))
         self._epoch_num = 0
         self._losses = 0
         self._num_sub_traj = 0
-        self._saved_model_dir = os.path.join(parent_dir, f'models_{prefix}')
+        self._saved_model_dir = os.path.join(parent_dir, f'{runtype}models_{prefix}')
         self._max_grad_norm = max_grad_norm
         self._size_batch_sub_trajs = size_batch_sub_trajs
         if not os.path.exists(self._saved_model_dir):
@@ -36,7 +36,7 @@ class TrainBeliefClassifier:
         if reload:
             state_dict = torch.load(os.path.join(self._saved_model_dir, f"model.pt"))
             self._belief_model.load_state_dict(state_dict["model_state_dict"])
-            # self._optimizer.load_state_dict(state_dict['optimizer_state_dict'])
+            self._optimizer.load_state_dict(state_dict['optimizer_state_dict'])
             self._epoch_num = state_dict["epoch_num"]
             np.random.set_state(state_dict['np_random_state'])
             torch.random.set_rng_state(state_dict['torch_random_state'])
@@ -108,11 +108,12 @@ class TrainBeliefClassifier:
                 num_sub_traj += 1
         return total_loss / num_sub_traj
 
-    def save_train_info(self, trajectories, next_skill_fails):
+    def save_train_info(self, trajectories=None, next_skill_fails=None):
         # log the performance metrics
         self._writer.add_scalar('training_loss', self._losses/(self._num_sub_traj), self._epoch_num)
-        val_loss = self.eval_model(trajectories, next_skill_fails)
-        self._writer.add_scalar('val_loss', val_loss, self._epoch_num)
+        if trajectories is not None:
+            val_loss = self.eval_model(trajectories, next_skill_fails)
+            self._writer.add_scalar('val_loss', val_loss, self._epoch_num)
         save_dict = {
             'model_state_dict': self._belief_model.state_dict(),
             'optimizer_state_dict': self._optimizer.state_dict(),
