@@ -38,9 +38,9 @@ class TrainBeliefClassifier:
         if runtype != "":
             now = datetime.datetime.now()
             dt_string = now.strftime("%Y_%m_%d_%H_%M_%S")
-            self._loss_log_fname = os.path.join(parent_dir, f"train_model_{dt_string}")
+            self._loss_log_fname = os.path.join(parent_dir, f"{runtype}train_model_{dt_string}.csv")
             f = open(self._loss_log_fname, "w")
-            f.write("Train Loss, Val Loss")
+            f.write("Train Loss, Val Loss\n")
             f.close()
         if reload:
             state_dict = torch.load(os.path.join(self._saved_model_dir, f"model.pt"))
@@ -127,7 +127,7 @@ class TrainBeliefClassifier:
             self._writer.add_scalar('val_loss', val_loss, self._epoch_num)
         if write_sep_file:
             f = open(self._loss_log_fname, "a")
-            f.write(f"{train_loss}, {val_loss}")
+            f.write(f"{train_loss}, {val_loss}\n")
             f.close()
         save_dict = {
             'model_state_dict': self._belief_model.state_dict(),
