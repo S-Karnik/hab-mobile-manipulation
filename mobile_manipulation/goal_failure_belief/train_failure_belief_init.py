@@ -11,6 +11,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from habitat_baselines.common.tensor_dict import TensorDict
 import pickle
+import datetime
 
 MAX_STEPS = 600
 
@@ -30,9 +31,17 @@ class TrainBeliefClassifier:
         self._saved_model_dir = os.path.join(parent_dir, f'{runtype}models_{prefix}')
         self._max_grad_norm = max_grad_norm
         self._size_batch_sub_trajs = size_batch_sub_trajs
+        self._runtype = runtype
         if not os.path.exists(self._saved_model_dir):
             os.mkdir(self._saved_model_dir)
         self._latest_path = os.path.join(self._saved_model_dir, f"model.pt")
+        if runtype != "":
+            now = datetime.datetime.now()
+            dt_string = now.strftime("%Y_%m_%d_%H_%M_%S")
+            self._loss_log_fname = os.path.join(parent_dir, f"train_model_{dt_string}")
+            f = open(self._loss_log_fname, "w")
+            f.write("Train Loss, Val Loss")
+            f.close()
         if reload:
             state_dict = torch.load(os.path.join(self._saved_model_dir, f"model.pt"))
             self._belief_model.load_state_dict(state_dict["model_state_dict"])
@@ -108,12 +117,18 @@ class TrainBeliefClassifier:
                 num_sub_traj += 1
         return total_loss / num_sub_traj
 
-    def save_train_info(self, trajectories=None, next_skill_fails=None):
+    def save_train_info(self, trajectories=None, next_skill_fails=None, write_sep_file=False):
         # log the performance metrics
-        self._writer.add_scalar('training_loss', self._losses/(self._num_sub_traj), self._epoch_num)
+        train_loss = self._losses/(self._num_sub_traj)
+        self._writer.add_scalar('training_loss', train_loss, self._epoch_num)
+        val_loss = "N/A"
         if trajectories is not None:
             val_loss = self.eval_model(trajectories, next_skill_fails)
             self._writer.add_scalar('val_loss', val_loss, self._epoch_num)
+        if write_sep_file:
+            f = open(self._loss_log_fname, "a")
+            f.write(f"{train_loss}, {val_loss}")
+            f.close()
         save_dict = {
             'model_state_dict': self._belief_model.state_dict(),
             'optimizer_state_dict': self._optimizer.state_dict(),

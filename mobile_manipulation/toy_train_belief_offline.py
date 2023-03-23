@@ -239,6 +239,7 @@ def main():
         with open(fname, "rb") as f:
             saved_data = pickle.load(f)
         belief_classifier.train_failure_belief_classifier(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
+        belief_classifier.save_train_info(saved_data["ob_trajectories"], saved_data["next_skill_fails"], write_sep_file=True)
     env.close()
 
 
