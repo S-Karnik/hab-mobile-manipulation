@@ -42,8 +42,7 @@ class PositionSensor(MySensor):
         """Return a position in the world frame."""
         raise NotImplementedError()
 
-    def get_observation(self, *args, task: RearrangeTask, **kwargs):
-        world_position = self._get_world_position(*args, task=task, **kwargs)
+    def compute_framed_position(self, task, world_position):
         position = mn.Vector3(world_position)
 
         robot = self._sim.robot
@@ -65,6 +64,9 @@ class PositionSensor(MySensor):
         position = T.transform_point(position)
         return np.array(position, dtype=np.float32)
 
+    def get_observation(self, *args, task: RearrangeTask, **kwargs):
+        world_position = self._get_world_position(*args, task=task, **kwargs)
+        return self.compute_framed_position(task, world_position)
 
 class MyMeasure(Measure):
     def __init__(self, *args, sim: RearrangeSim, config: Config, **kwargs):

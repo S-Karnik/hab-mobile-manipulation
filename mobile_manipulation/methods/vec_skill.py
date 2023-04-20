@@ -2,18 +2,20 @@ from collections import OrderedDict
 from typing import Dict
 
 from habitat import Config, RLEnv
+from habitat.core.vector_env import VectorEnv
 
 from mobile_manipulation.common.registry import (
-    mm_registry as my_registry,
+    vmm_registry as my_registry,
 )
 
 
 class Skill:
-    def __init__(self, config: Config, rl_env: RLEnv):
+    def __init__(self, config: Config, vec_rl_env: VectorEnv, vec_rl_env_idx: int):
         self._config = config
-        self._rl_env = rl_env
-        self._obs_space = rl_env.observation_space
-        self._action_space = rl_env.action_space
+        self._vec_rl_env = vec_rl_env
+        self._vec_rl_env_idx = vec_rl_env_idx
+        self._obs_space = self._vec_rl_env.observation_spaces[self._vec_rl_env_idx]
+        self._action_space = self._vec_rl_env.action_spaces[self._vec_rl_env_idx]
 
     def reset(self, obs, **kwargs):
         self._elapsed_steps = 0
@@ -48,7 +50,7 @@ class Wait(Skill):
 @my_registry.register_skill
 class Terminate(Skill):
     def act(self, obs, **kwargs):
-        self._rl_env.habitat_env.task._should_terminate = True
+        self._vec_rl_env.call_at(self._vec_rl_env_idx, "set_terminate", {"should_terminate": True})
         return {"action": "EmptyAction"}
 
     def should_terminate(self, obs, **kwargs):
@@ -64,18 +66,22 @@ class CompositeSkill(Skill):
     def __init__(
         self,
         config: Config,
-        rl_env: RLEnv,
+        vec_rl_env: VectorEnv,
+        vec_rl_env_idx: int,
     ):
         self._config = config
-        self._rl_env = rl_env
+        self._vec_rl_env = vec_rl_env
+        self._vec_rl_env_idx = vec_rl_env_idx
 
         self.skill_sequence = config.get("SKILL_SEQUENCE", config.SKILLS)
         self.skills = self._init_entities(
             entity_names=config.SKILLS,
             register_func=my_registry.get_skill,
             entities_config=config,
-            rl_env=rl_env,
+            vec_rl_env=vec_rl_env,
+            vec_rl_env_idx=vec_rl_env_idx,
         )
+        self.set_skill_idx(0)
 
     def _init_entities(
         self, entity_names, register_func, entities_config=None, **kwargs
@@ -115,6 +121,7 @@ class CompositeSkill(Skill):
         # print("Skill <{}> begin.".format(self.current_skill_name))
         self.current_skill.reset(obs, **kwargs)
 
+
     def act(self, obs, **kwargs):
         if self.current_skill.should_terminate(obs, **kwargs):
             # print("Skill <{}> terminate.".format(self.current_skill_name))
@@ -128,10 +135,10 @@ class CompositeSkill(Skill):
             if action is None:  # nested composite skill terminate
                 action = self.act(obs, **kwargs)
             return action
-
+            
     def check_if_done(self, obs):
         return (self.current_skill is None) or (self.current_skill.should_terminate(obs) and (self._skill_idx == (len(self.skill_sequence)-1)))
-
+    
     def to(self, device):
         for skill in self.skills.values():
             skill.to(device)

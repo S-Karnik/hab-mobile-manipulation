@@ -250,11 +250,19 @@ def main():
     # Compute config stages and aliases
     config_stages = list(config.TASK_CONFIG.TASK.StageSuccess.GOALS.keys())
     config_stage_aliases = [s for s in policy.skill_sequence if (not is_navigate(s)) and (not is_reset_arm(s)) and (not is_next_target(s))]
-    config_stage_alias_dict = {config_stage_aliases[i]: config_stages[i] for i in range(len(config_stage_aliases))}
+    config_stage_alias_dict = {config_stage_aliases[i]: [] for i in range(len(config_stage_aliases))}
+    for i in range(len(config_stage_aliases)):
+        config_stage_alias_dict[config_stage_aliases[i]].append(config_stages[i])
 
-    # reload = True
-    # belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, num_epochs_per_update=args.num_epochs_per_update, reload=reload)
+    num_post_nav_skills = 0
+    for i in range(len(policy.skill_sequence)):
+        if policy.skill_sequence[i] == "NavRLSkill":
+            num_post_nav_skills += 1
+
     for i_ep in tqdm(range(num_episodes)):
+        config_stage_alias_dict = {config_stage_aliases[i]: [] for i in range(len(config_stage_aliases))}
+        for i in range(len(config_stage_aliases)):
+            config_stage_alias_dict[config_stage_aliases[i]].append(config_stages[i])
         ob = env.reset()
         policy.reset(ob)
 
@@ -269,11 +277,14 @@ def main():
         current_skill = None
         current_skills = []
         post_nav_skills = []
+        nav_index = -1
+        
         while True:
             if current_skill != policy.current_skill_name: 
                 if is_navigate(policy.current_skill_name):
                     ob_trajectories.append([])
                     post_nav_skills.append(None)
+                    nav_index += 1
 
                 if not is_reset_arm(current_skill):
                     prev_skill = current_skill
@@ -285,7 +296,8 @@ def main():
             
             if is_navigate(policy.current_skill_name):
                 old_ob = {k: ob[k] for k in relevant_ob_keys}
-                old_ob["next_skill"] = skill_ordering_dict[policy.skill_sequence[policy._skill_idx + 2]]
+                old_ob["next_skill"] = np.zeros(num_post_nav_skills)
+                old_ob["next_skill"][nav_index] = 1
                 old_ob["goal"] = get_goal_position(env)
                 ob_trajectories[-1].append(old_ob)
                 
@@ -300,7 +312,11 @@ def main():
             if done:
                 break
         
-        next_skill_fails += [not info["stage_success"][config_stage_alias_dict[s]] for s in post_nav_skills]
+        new_next_skill_fails = []
+        for s in post_nav_skills:
+            skill = config_stage_alias_dict[s].pop(0)
+            new_next_skill_fails.append(not info["stage_success"][skill])
+        next_skill_fails += new_next_skill_fails
         # -------------------------------------------------------------------------- #
         # Update stats
         # -------------------------------------------------------------------------- #

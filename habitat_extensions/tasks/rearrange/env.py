@@ -1,6 +1,7 @@
 import copy
 from typing import List, Optional
 
+from gym import spaces
 import magnum as mn
 import numpy as np
 from habitat import Config, Dataset, RLEnv
@@ -135,3 +136,111 @@ class RearrangeRLEnv(RLEnv):
             return observations_to_image(obs)
         else:
             return super().render(mode=mode)
+        
+    def set_terminate(self, should_terminate: bool) -> None:
+        self._env.task._should_terminate = should_terminate
+
+    def grip_desnap(self, should_desnap: bool) -> None:
+        self._env._sim.gripper.desnap(should_desnap)
+
+    def get_observation_space(self) -> spaces.Dict:
+        return self.observation_space
+    
+    def get_action_space(self) -> spaces.Dict:
+        return self.action_space
+    
+    def compute_framed_position(self, task, world_position, frame):
+        position = mn.Vector3(world_position)
+
+        robot = self._env._sim.robot
+        if frame == "world":
+            T = mn.Matrix4.identity_init()
+        elif frame == "base":
+            T = robot.base_T.inverted()
+        elif frame == "gripper":
+            T = robot.gripper_T.inverted()
+        elif frame == "base_t":
+            T = mn.Matrix4.translation(-robot.base_T.translation)
+        elif frame == "start_base":
+            T = task.start_base_T.inverted()
+        else:
+            raise NotImplementedError(frame)
+
+        position = T.transform_point(position)
+        return np.array(position, dtype=np.float32)
+    
+    def set_goal(self, goal_residual, current_obs):
+        if self._env._sim.gripper.is_grasped:
+            place_goal = self.task.place_goal
+            world_goal = place_goal + goal_residual
+            transformed_goal_at_base = self.compute_framed_position(self.task, world_goal, "base")
+            transformed_goal_at_gripper= self.compute_framed_position(self.task, world_goal, "gripper")
+            current_obs["place_goal_at_base"] = transformed_goal_at_base
+            current_obs["place_goal_at_gripper"] = transformed_goal_at_gripper
+        else:
+            pick_goal = self.task.pick_goal
+            world_goal = pick_goal + goal_residual
+            transformed_goal_at_base = self.compute_framed_position(self.task, world_goal, "base")
+            transformed_goal_at_gripper= self.compute_framed_position(self.task, world_goal, "gripper")
+            current_obs["pick_goal_at_base"] = transformed_goal_at_base
+            current_obs["pick_goal_at_gripper"] = transformed_goal_at_gripper
+        current_obs["nav_goal_at_base"] = transformed_goal_at_base
+        return current_obs
+    
+    def set_goal_old(self, goal_residual, current_obs):
+        if self._env._sim.gripper.is_grasped:
+            goal = current_obs["place_goal_at_base"] + goal_residual
+            current_obs["place_goal_at_base"] = goal
+        else:
+            goal = current_obs["place_goal_at_base"] + goal_residual
+            current_obs["pick_goal_at_base"] = goal
+        current_obs["nav_goal_at_base"] = goal
+        return current_obs
+    
+    @property
+    def task(self):
+        return self._env.task
+    
+    @property
+    def sim(self):
+        return self._env._sim
+    
+    def get_metrics(self):
+        return self._env.get_metrics()
+    
+    def get_original_pick_goal(self):
+        return self._env.task.original_pick_goal
+
+    def get_original_place_goal(self):
+        return self._env.task.original_place_goal
+    
+    def get_task_is_stop_called(self, action):
+        return self._env.task.actions[action].is_stop_called
+
+    def get_robot_arm_joint_pos(self):
+        return self._env.sim.robot.arm_joint_pos
+
+    def get_policy_action(self, policy, ob):
+        return policy.act(ob)
+
+    def pyb_robot_ik(self, ee_tgt_pos, max_iters=100):
+        return self._env.sim.pyb_robot.IK(ee_tgt_pos, max_iters)
+
+    def task_tgt_idx_incr(self):
+        self._env.task.set_target(self._env.task.tgt_idx + 1)
+
+    def set_task_is_stop_called(self, action, is_stop_called):
+        self._env.task.actions[action].is_stop_called = is_stop_called
+
+    def set_ee_tgt_pos(self, action_names, ee_tgt_pos):
+        task_actions = self._env.task.actions
+        for action_name in action_names:
+            if action_name not in task_actions:
+                continue
+            task_actions[action_name].ee_tgt_pos = ee_tgt_pos
+
+    def set_ee_pyb_joint_states(self):
+        self._env.sim.pyb_robot.set_joint_states(self._env.sim.robot.params.arm_init_params)
+    
+    def set_robot_arm_motor_pos(self, arm_motor_pos):
+        self._env.sim.robot.arm_motor_pos = arm_motor_pos

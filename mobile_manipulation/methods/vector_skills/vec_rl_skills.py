@@ -9,9 +9,9 @@ from habitat_baselines.rl.ppo.policy import Policy
 from habitat_baselines.utils.common import batch_obs
 
 from mobile_manipulation.common.registry import (
-    mm_registry as my_registry,
+    vmm_registry as my_registry,
 )
-from mobile_manipulation.methods.skill import Skill
+from mobile_manipulation.methods.vec_skill import Skill
 from mobile_manipulation.ppo.policy import ActorCritic
 from mobile_manipulation.utils.common import get_state_dict_by_prefix
 
@@ -32,7 +32,7 @@ class RLSkill(Skill):
         action_space = self._action_space[self._config.ACTION]
         policy_config = ckpt_config.RL["POLICY" + skill_idx]
         policy = baseline_registry.get_policy(policy_config.name)
-
+        # import pdb; pdb.set_trace()
         actor_critic: ActorCritic = policy.from_config(
             policy_config, self._obs_space, action_space
         )
@@ -108,12 +108,12 @@ class PickRLSkill(RLSkill):
         return step_action
 
     def check_success_from_info(self):
-        info = self._rl_env.habitat_env.get_metrics()
+        info = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_metrics", {})
         success = info["rearrange_pick_success"]
         return success
 
     def check_success_from_obs(self, obs):
-        info = self._rl_env.habitat_env.get_metrics()
+        info = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_metrics", {})
         is_grasped = obs["is_grasped"] > 0.5
         if "gripper_to_resting_dist" in info:
             gripper_to_resting_dist = info["gripper_to_resting_dist"]
@@ -142,9 +142,7 @@ class PickRLSkill(RLSkill):
 class NavRLSkill(RLSkill):
     def reset(self, obs, **kwargs):
         super().reset(obs, **kwargs)
-        task = self._rl_env.habitat_env.task
-        task_action = task.actions[self._config.ACTION]
-        task_action.is_stop_called = False
+        self._vec_rl_env.call_at(self._vec_rl_env_idx, "set_task_is_stop_called", {"action": self._config.ACTION, "is_stop_called": False})
 
     def should_terminate(self, obs, **kwargs):
         if self.is_timeout():
@@ -161,14 +159,13 @@ class NavRLSkill(RLSkill):
             raise NotImplementedError(end_type)
 
     def check_success_gt(self):
-        info = self._rl_env.get_info()
+        info = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_info", {})
         success = info["rearrange_nav_success"]
         return success
 
     def check_stop_called(self):
-        task = self._rl_env.habitat_env.task
-        task_action = task.actions[self._config.ACTION]
-        return task_action.is_stop_called
+        task_action_is_stop_called = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_task_is_stop_called", {"action": self._config.ACTION})
+        return task_action_is_stop_called
 
 
 @my_registry.register_skill
@@ -185,12 +182,12 @@ class PlaceRLSkill(RLSkill):
         return step_action
 
     def check_success_from_info(self):
-        info = self._rl_env.habitat_env.get_metrics()
+        info = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_metrics", {})
         success = info["rearrange_place_success"]
         return success
 
     def check_success_from_obs(self, obs, **kwargs):
-        info = self._rl_env.habitat_env.get_metrics()
+        info = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_metrics", {})
         is_grasped = obs["is_grasped"] > 0.5
         if "gripper_to_resting_dist" in info:
             gripper_to_resting_dist = info["gripper_to_resting_dist"]
@@ -210,7 +207,7 @@ class PlaceRLSkill(RLSkill):
             is_grasped = obs["is_grasped"] > 0.5
             if is_grasped:
                 print("Release when timeout")
-                self._rl_env.habitat_env.sim.gripper.desnap(False)
+                self._vec_rl_env.call_at(self._vec_rl_env_idx, "grip_desnap", {"should_desnap": False})
             return True
 
         end_type = self._config.END_TYPE
@@ -234,7 +231,7 @@ class SetMarkerRLSkill(RLSkill):
         return super().act(obs, **kwargs)
 
     def _get_gripper_distance(self, obs):
-        info = self._rl_env.habitat_env.get_metrics()
+        info = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_metrics", {})
         if "gripper_to_resting_dist" in info:
             gripper_to_resting_dist = info["gripper_to_resting_dist"]
         else:
@@ -258,7 +255,7 @@ class SetMarkerRLSkill(RLSkill):
             is_grasped = obs["is_grasped"] > 0.5
             if is_grasped:
                 print("Release when timeout")
-                self._rl_env.habitat_env.sim.gripper.desnap(False)
+                self._vec_rl_env.call_at(self._vec_rl_env_idx, "grip_desnap", {"should_desnap": False})
             return True
 
         end_type = self._config.get("END_TYPE", "obs")
@@ -277,7 +274,7 @@ class PickPlaceRLSkill(RLSkill):
         return super().act(obs, **kwargs)
 
     def _get_gripper_distance(self, obs):
-        info = self._rl_env.habitat_env.get_metrics()
+        info = self._vec_rl_env.call_at(self._vec_rl_env_idx, "get_metrics", {})
         if "gripper_to_resting_dist" in info:
             gripper_to_resting_dist = info["gripper_to_resting_dist"]
         else:
@@ -292,7 +289,7 @@ class PickPlaceRLSkill(RLSkill):
             is_grasped = obs["is_grasped"] > 0.5
             if is_grasped:
                 print("Release when timeout")
-                self._rl_env.habitat_env.sim.gripper.desnap(False)
+                self._vec_rl_env.call_at(self._vec_rl_env_idx, "grip_desnap", {"should_desnap": False})
             return True
         else:
             return False

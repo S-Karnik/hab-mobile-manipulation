@@ -46,7 +46,7 @@ class ClassifierNet(nn.Module):
         super().__init__()
         self.mlp = MLP(num_inputs, hidden_sizes).orthogonal_()
         self.linear = nn.Linear(self.mlp.output_size, 1)
-        self.lin_seq = nn.Sequential(self.linear, nn.Dropout(p=0.5))
+        self.lin_seq = self.linear
         self.sigmoid = nn.Sigmoid()
         nn.init.orthogonal_(self.linear.weight, gain=0.01)
         nn.init.constant_(self.linear.bias, 0)
@@ -68,6 +68,7 @@ class GaussianNet(nn.Module):
         max_std: float,
         conditioned_std: bool,
         std_init_bias: float,
+        ddpg_init = None,
         # TODO(jigu): remove deprecated keys in ckpt
         **kwargs
     ) -> None:
@@ -85,7 +86,10 @@ class GaussianNet(nn.Module):
         self.mlp = MLP(num_inputs, hidden_sizes).orthogonal_()
 
         self.mu = nn.Linear(self.mlp.output_size, num_outputs)
-        nn.init.orthogonal_(self.mu.weight, gain=0.01)
+        if ddpg_init is None:
+            nn.init.orthogonal_(self.mu.weight, gain=0.01)
+        else:
+            self.mu.weight.data.uniform_(-ddpg_init, ddpg_init)
         nn.init.constant_(self.mu.bias, 0)
 
         if conditioned_std:

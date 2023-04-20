@@ -61,6 +61,7 @@ def construct_envs(
     workers_ignore_signals: bool = False,
     auto_reset_done: bool = True,
     wrappers: List[gym.Wrapper] = (),
+    debug = True,
 ) -> VectorEnv:
     r"""Create VectorEnv object with specified config and env class type.
     To allow better performance, dataset are split into small ones for
@@ -118,7 +119,83 @@ def construct_envs(
         configs.append(proc_config)
 
     # Vectorize environments
-    debug = os.environ.get("HABITAT_ENV_DEBUG", 0)
+    # debug = os.environ.get("HABITAT_ENV_DEBUG", 0)
+    vec_env_cls = ThreadedVectorEnv if debug else VectorEnv
+    envs = vec_env_cls(
+        make_env_fn=make_env_fn,
+        env_fn_args=tuple(zip(configs, env_classes, [wrappers] * num_envs)),
+        workers_ignore_signals=workers_ignore_signals,
+        auto_reset_done=auto_reset_done,
+    )
+    return envs
+
+def construct_envs_multi_config(
+    config: Config,
+    skill_config: Config,
+    env_class: Union[Type[Env], Type[RLEnv]],
+    split_dataset: bool,
+    workers_ignore_signals: bool = False,
+    auto_reset_done: bool = True,
+    wrappers: List[gym.Wrapper] = (),
+    debug = False,
+) -> VectorEnv:
+    r"""Create VectorEnv object with specified config and env class type.
+    To allow better performance, dataset are split into small ones for
+    each individual env, grouped by scenes.
+
+    Args:
+        config: configs that contain num_environments as well as information
+            necessary to create individual environments.
+        env_class: class type of the envs to be created.
+        split_dataset: whether to split datasets according to scene_ids
+        workers_ignore_signals: Passed to :ref:`habitat.VectorEnv`'s constructor
+        auto_reset_done: Passed to :ref:`habitat.VectorEnv`'s constructor
+        wrappers: gym wrappers for env_class
+
+    Returns:
+        VectorEnv object created according to specification.
+    """
+
+    # num_envs = skill_config.NUM_ENVIRONMENTS
+    num_envs = 16
+    configs = []
+    env_classes = [env_class] * num_envs
+
+    # NOTE(jigu): One scene per process can maximize the simulation speed.
+    if split_dataset:
+        dataset = make_dataset(
+            skill_config.TASK_CONFIG.DATASET.TYPE, config=config.TASK_CONFIG.DATASET
+        )
+        # print(len(dataset.scene_ids))
+        datasets = dataset.get_splits(
+            num_envs, sort_by_episode_id=True, allow_uneven_splits=True
+        )
+        episode_splits = [x.episode_ids for x in datasets]
+        # for dataset in datasets:
+        #     print(dataset.num_episodes)
+        #     print(dataset.scene_ids)
+
+    # Prepare the config for each environment
+    for i in range(num_envs):
+        proc_config = config.clone()
+        proc_config.defrost()
+
+        task_config = proc_config.TASK_CONFIG
+        task_config.SEED = task_config.SEED + i
+        if split_dataset:
+            task_config.DATASET.EPISODE_IDS = episode_splits[i]
+
+        # NOTE(jigu): overwrite here to avoid polluating config saved in ckpt
+        # overwrite simulator config
+        task_config.SIMULATOR.HABITAT_SIM_V0.GPU_DEVICE_ID = (
+            config.SIMULATOR_GPU_ID
+        )
+        # task_config.SIMULATOR.AGENT_0.SENSORS = ['HEAD_DEPTH_SENSOR', 'ARM_DEPTH_SENSOR']
+        proc_config.freeze()
+        configs.append(proc_config)
+
+    # Vectorize environments
+    # debug = os.environ.get("HABITAT_ENV_DEBUG", 0)
     vec_env_cls = ThreadedVectorEnv if debug else VectorEnv
     envs = vec_env_cls(
         make_env_fn=make_env_fn,

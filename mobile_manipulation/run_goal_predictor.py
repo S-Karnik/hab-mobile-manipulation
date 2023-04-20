@@ -3,13 +3,17 @@ import json
 import os
 import os.path as osp
 import re
-
+import time
 import magnum as mn
 import numpy as np
+import random
 import torch
+
 from habitat import Config, logger
 from habitat_baselines.utils.common import batch_obs, generate_video
+from mobile_manipulation.goal_failure_belief.goal_actor_critic.goal_actor_critic_skill_sequence_fixed_env import TrainGoalActorCriticFixedEnv
 
+import mobile_manipulation.methods.skills
 from habitat_extensions.tasks.rearrange import RearrangeRLEnv
 from habitat_extensions.tasks.rearrange.play import get_action_from_key
 from habitat_extensions.utils.viewer import OpenCVViewer
@@ -22,13 +26,8 @@ from mobile_manipulation.utils.common import (
     get_run_name,
 )
 from mobile_manipulation.utils.wrappers import HabitatActionWrapperV1
-from mobile_manipulation.goal_failure_belief.train_failure_belief_init import TrainBeliefClassifier
-
-import pickle
-from gym import spaces
-
-from tqdm import tqdm
-import random
+from mobile_manipulation.goal_failure_belief.goal_actor_critic.goal_actor_critic_skill_sequence import TrainGoalActorCritic
+from mobile_manipulation.utils.common import warn
 
 def preprocess_config(config_path: str, config: Config):
     config.defrost()
@@ -45,6 +44,58 @@ def preprocess_config(config_path: str, config: Config):
             prefix=config.PREFIX, baseRunDir=config.BASE_RUN_DIR, **substitutes
         )
 
+def preprocess_skill_config(config: Config, args):
+    config_path = args.skill_config_path
+    run_type = args.run_type
+
+    config.defrost()
+
+    # placeholders supported in config
+    fileName = osp.splitext(osp.basename(config_path))[0]
+    runName = get_run_name()
+    timestamp = time.strftime("%y%m%d")
+    substitutes = dict(
+        fileName=fileName,
+        runName=runName,
+        runType=run_type,
+        timestamp=timestamp,
+    )
+
+    config.PREFIX = config.PREFIX.format(**substitutes)
+    config.BASE_RUN_DIR = config.BASE_RUN_DIR.format(**substitutes)
+
+    for key in ["CHECKPOINT_FOLDER"]:
+        config[key] = config[key].format(
+            prefix=config.PREFIX, baseRunDir=config.BASE_RUN_DIR, **substitutes
+        )
+
+    for key in ["LOG_FILE", "TENSORBOARD_DIR", "VIDEO_DIR"]:
+        if key not in config:
+            warn(f"'{key}' is missed in the config")
+            continue
+        if run_type == "train":
+            prefix = config.PREFIX
+        else:
+            prefix = config.EVAL.PREFIX or config.PREFIX
+        config[key] = config[key].format(
+            prefix=prefix,
+            baseRunDir=config.BASE_RUN_DIR,
+            **substitutes,
+        )
+    
+    # Support relative path like "@/ckpt.pth"
+    config.EVAL.CKPT_PATH = config.EVAL.CKPT_PATH.replace(
+        "@", config.CHECKPOINT_FOLDER
+    )
+
+    # Override
+    if args.split is not None:
+        if run_type == "train":
+            config.TASK_CONFIG.DATASET.SPLIT = args.split
+        else:
+            config.EVAL.SPLIT = args.split
+            
+    config.freeze()
 
 def update_ckpt_path(config: Config, seed: int):
     config.defrost()
@@ -59,45 +110,22 @@ def update_ckpt_path(config: Config, seed: int):
     config.freeze()
 
 
-def is_navigate(x):
-    return x == "NavRLSkill"
-
-def is_reset_arm(x):
-    return x == "ResetArm"
-
-def is_next_target(x):
-    return x == "NextTarget"
-
-def get_goal_position(env):
-    if env.env._env._sim.gripper.is_grasped:
-        return env.env._env.task.place_goal
-    else:
-        return env.env._env.task.pick_goal
-    
-def update_sensor_resolution(config: Config, height, width):
-    config.defrost()
-    sensor_names = [
-        "THIRD_RGB_SENSOR",
-        "RGB_SENSOR",
-        "DEPTH_SENSOR",
-        "SEMANTIC_SENSOR",
-    ]
-    for name in sensor_names:
-        sensor_cfg = config.TASK_CONFIG.SIMULATOR[name]
-        sensor_cfg.HEIGHT = height
-        sensor_cfg.WIDTH = width
-        print(f"Update {name} resolution")
-    config.freeze()
-
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cfg", dest="config_path", type=str, required=True)
+    parser.add_argument("--cfg-skill", dest="skill_config_path", type=str, required=True)
     parser.add_argument(
         "opts",
         default=None,
         nargs=argparse.REMAINDER,
         help="Modify config options from command line",
+    )
+    parser.add_argument(
+        "--run-type",
+        choices=["train", "eval"],
+        required=True,
+        help="run type of the experiment (train or eval)",
     )
 
     # Episodes
@@ -130,6 +158,8 @@ def main():
     # Policy
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--train-seed", type=int)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--gpu-id", type=int)
 
     # Rendering
     parser.add_argument("--render-mode", type=str, default="human")
@@ -143,20 +173,17 @@ def main():
         help="use high resolution for visualization",
     )
 
-    parser.add_argument(
-        "--num_epochs_per_update",
-        type=int,
-        default=10
-    )
-
     args = parser.parse_args()
 
     # ---------------------------------------------------------------------------- #
     # Configure
     # ---------------------------------------------------------------------------- #
     config = get_config(args.config_path, opts=args.opts)
+    skill_config = get_config(args.skill_config_path, opts=args.opts)
     preprocess_config(args.config_path, config)
+    preprocess_skill_config(skill_config, args)
     torch.set_num_threads(1)
+    seed = args.seed
 
     config.defrost()
     if args.split is not None:
@@ -169,13 +196,11 @@ def main():
         config.TASK_CONFIG.SIMULATOR.AGENT_0.SENSORS = [
             x for x in sensors if "RGB" not in x
         ]
+    config.TASK_CONFIG.SEED = seed
     config.freeze()
 
     if args.train_seed is not None:
         update_ckpt_path(config, seed=args.train_seed)
-
-    if args.high_res:
-        update_sensor_resolution(config, height=720, width=1080)
 
     if args.save_log:
         if config.LOG_FILE:
@@ -184,64 +209,17 @@ def main():
             logger.add_filehandler(config.LOG_FILE)
         logger.info(config)
         logger.info("commit id: {}".format(get_git_commit_id()))
-
-    # For reproducibility, just skip other episodes
-    if args.episode_ids is not None:
-        eval_episode_ids = eval(args.episode_ids)
-        eval_episode_ids = [str(x) for x in eval_episode_ids]
+    
+    gpu_id = args.gpu_id
+    # seed = 101
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if args.split == "val":
+        trainer = TrainGoalActorCriticFixedEnv(composite_task_config=config, skill_config=skill_config, seed=seed, gpu_id=gpu_id)
     else:
-        eval_episode_ids = None
-
-    # ---------------------------------------------------------------------------- #
-    # Initialize env
-    # ---------------------------------------------------------------------------- #
-    env = RearrangeRLEnv(config)
-    env = HabitatActionWrapperV1(env)
-    env.seed(config.TASK_CONFIG.SEED)
-    print("obs space", env.observation_space)
-    print("action space", env.action_space)
-
-    # -------------------------------------------------------------------------- #
-    # Initialize policy
-    # -------------------------------------------------------------------------- #
-    policy = CompositeSkill(config.SOLUTION, env)
-    policy.to(args.device)
-
-    # -------------------------------------------------------------------------- #
-    # Main
-    # -------------------------------------------------------------------------- #
-    num_episodes = env.number_of_episodes
-    # num_episodes = len(env.habitat_env.episode_iterator.episodes)
-    if args.num_episodes is not None:
-        num_episodes = args.num_episodes
-
-    relevant_ob_keys = ["robot_head_depth", "nav_goal_at_base"]
-    skill_ordering = []
-    for s in policy.skills:
-        if (s not in skill_ordering) and (not is_navigate(s)) and (not is_reset_arm(s)):
-            skill_ordering.append(s)
-    skill_ordering_dict = {s: np.zeros(len(skill_ordering)) for s in skill_ordering}
-
-    for i, s in enumerate(skill_ordering):
-        skill_ordering_dict[s][i] = 1
-
-    # Recompute obs space with new next_skill observation
-    new_obs_space_dict = env.observation_space.spaces.copy()
-    new_obs_space_dict["next_skill"] = spaces.Box(0, 1, (len(skill_ordering),), np.int32)
-    new_obs_space_dict["goal"] = spaces.Box(-np.inf, np.inf, (3,), np.float32)
-    new_observation_space = spaces.Dict(new_obs_space_dict)
-
-    reload = False
-    belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, reload=reload, runtype="toy")
-    num_epochs = 15
-    fname = "mobile_manipulation/goal_failure_belief/toy_belief_train_data/saved_traj_49.pkl"
-    for epoch in tqdm(range(num_epochs)):
-        with open(fname, "rb") as f:
-            saved_data = pickle.load(f)
-        belief_classifier.train_failure_belief_classifier(saved_data["ob_trajectories"], saved_data["next_skill_fails"])
-        belief_classifier.save_train_info(saved_data["ob_trajectories"], saved_data["next_skill_fails"], write_sep_file=True)
-    env.close()
-
+        trainer = TrainGoalActorCritic(composite_task_config=config, skill_config=skill_config, seed=seed, gpu_id=gpu_id)
+    trainer.train()
 
 if __name__ == "__main__":
     main()

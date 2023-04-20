@@ -42,6 +42,8 @@ class TidyHouseTask(RearrangeTask):
         self.tgt_obj, self.tgt_T = self._sim.get_target(self.tgt_idx)
         self.pick_goal = self.obj_start_pos[self.tgt_obj.handle]
         self.place_goal = np.array(self.tgt_T.translation, dtype=np.float32)
+        self.original_pick_goal = self.obj_start_pos[self.tgt_obj.handle]
+        self.original_place_goal = np.array(self.tgt_T.translation, dtype=np.float32)
         self.nav_goal_pick = compute_start_state(self._sim, self.pick_goal)
         self.nav_goal_place = compute_start_state(self._sim, self.place_goal)
 
@@ -128,7 +130,8 @@ class SetTableTask(RearrangeTask):
         self._set_target(index)
         self.pick_goal = self.obj_start_pos[self.tgt_obj.handle]
         self.place_goal = np.array(self.tgt_T.translation, dtype=np.float32)
-
+        self.original_pick_goal = self.obj_start_pos[self.tgt_obj.handle]
+        self.original_place_goal = np.array(self.tgt_T.translation, dtype=np.float32)
         if self._has_target_in_fridge():
             self.marker_name = "fridge_push_point"
             self.marker = self._sim.markers[self.marker_name]

@@ -24,11 +24,31 @@ from mobile_manipulation.utils.common import (
 )
 from mobile_manipulation.utils.wrappers import HabitatActionWrapperV1
 from mobile_manipulation.goal_failure_belief.train_failure_belief_init import TrainBeliefClassifier
+from mobile_manipulation.goal_failure_belief.energy_goal_sampler import EnergyGoalSampler
 
-import pickle
 from gym import spaces
 
-from tqdm import tqdm
+def is_navigate(x):
+    return x == "NavRLSkill"
+
+def is_reset_arm(x):
+    return x == "ResetArm"
+
+def is_next_target(x):
+    return x == "NextTarget"
+
+
+def get_goal_position(env):
+    if env.env._env._sim.gripper.is_grasped:
+        return env.env._env.task.place_goal
+    else:
+        return env.env._env.task.pick_goal
+
+def set_goal_position(env, new_goal) -> None:
+    if env.env._env._sim.gripper.is_grasped:
+        env.env._env.task.place_goal = new_goal
+    else:
+        env.env._env.task.pick_goal = new_goal
 
 def preprocess_config(config_path: str, config: Config):
     config.defrost()
@@ -59,21 +79,6 @@ def update_ckpt_path(config: Config, seed: int):
     config.freeze()
 
 
-def is_navigate(x):
-    return x == "NavRLSkill"
-
-def is_reset_arm(x):
-    return x == "ResetArm"
-
-def is_next_target(x):
-    return x == "NextTarget"
-
-def get_goal_position(env):
-    if env.env._env._sim.gripper.is_grasped:
-        return env.env._env.task.place_goal
-    else:
-        return env.env._env.task.pick_goal
-    
 def update_sensor_resolution(config: Config, height, width):
     config.defrost()
     sensor_names = [
@@ -101,7 +106,7 @@ def main():
     )
 
     # Episodes
-    parser.add_argument("--split", type=str, default="train")
+    parser.add_argument("--split", type=str, default="val")
     parser.add_argument(
         "--shuffle",
         action="store_true",
@@ -141,12 +146,6 @@ def main():
         "--high-res",
         action="store_true",
         help="use high resolution for visualization",
-    )
-
-    parser.add_argument(
-        "--num_epochs_per_update",
-        type=int,
-        default=10
     )
 
     args = parser.parse_args()
@@ -191,57 +190,21 @@ def main():
         eval_episode_ids = [str(x) for x in eval_episode_ids]
     else:
         eval_episode_ids = None
-
-    eval_episode_id = "14"
-    # ---------------------------------------------------------------------------- #
-    # Initialize env
-    # ---------------------------------------------------------------------------- #
-    env = RearrangeRLEnv(config)
-    env = HabitatActionWrapperV1(env)
-    env.seed(config.TASK_CONFIG.SEED)
-
-    # -------------------------------------------------------------------------- #
-    # Initialize policy
-    # -------------------------------------------------------------------------- #
-    policy = CompositeSkill(config.SOLUTION, env)
-    policy.to(args.device)
-
-    # -------------------------------------------------------------------------- #
-    # Main
-    # -------------------------------------------------------------------------- #
-
-    done, info = True, {}
-    episode_reward = 0
-    
-    relevant_ob_keys = ["robot_head_depth", "nav_goal_at_base"]
-    skill_ordering = []
-    for s in policy.skills:
-        if (s not in skill_ordering) and (not is_navigate(s)) and (not is_reset_arm(s)):
-            skill_ordering.append(s)
-    skill_ordering_dict = {s: np.zeros(len(skill_ordering)) for s in skill_ordering}
-
-    for i, s in enumerate(skill_ordering):
-        skill_ordering_dict[s][i] = 1
-
-    # Recompute obs space with new next_skill observation
-    new_obs_space_dict = env.observation_space.spaces.copy()
-    new_obs_space_dict["next_skill"] = spaces.Box(0, 1, (len(skill_ordering),), np.int32)
-    new_obs_space_dict["goal"] = spaces.Box(-np.inf, np.inf, (3,), np.int32)
-    new_observation_space = spaces.Dict(new_obs_space_dict)
-
-    # Compute config stages and aliases
-    config_stages = list(config.TASK_CONFIG.TASK.StageSuccess.GOALS.keys())
-    config_stage_aliases = [s for s in policy.skill_sequence if (not is_navigate(s)) and (not is_reset_arm(s)) and (not is_next_target(s))]
-    config_stage_alias_dict = {config_stage_aliases[i]: config_stages[i] for i in range(len(config_stage_aliases))}
-
-    reload = False
-    belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, reload=reload, runtype="toy")
-
+    eval_episode_ids = ['3']
+    num_epochs = 10000
     num_epoch_trajs = 50
-    for epoch in tqdm(range(10000)):
+    goal_sample_episode = 100
+
+    for epoch in range(num_epochs):
+        # ---------------------------------------------------------------------------- #
+        # Initialize env
+        # ---------------------------------------------------------------------------- #
         env = RearrangeRLEnv(config)
         env = HabitatActionWrapperV1(env)
         env.seed(config.TASK_CONFIG.SEED)
+        print("obs space", env.observation_space)
+        print("action space", env.action_space)
+        
 
         # -------------------------------------------------------------------------- #
         # Initialize policy
@@ -252,71 +215,159 @@ def main():
         # -------------------------------------------------------------------------- #
         # Main
         # -------------------------------------------------------------------------- #
+        num_episodes = env.number_of_episodes
+        # num_episodes = len(env.habitat_env.episode_iterator.episodes)
+        if args.num_episodes is not None:
+            num_episodes = args.num_episodes
+
         done, info = True, {}
+        all_episode_stats = []
         episode_reward = 0
+        failure_episodes = []
+
+        if args.save_video is not None:
+            os.makedirs(config.VIDEO_DIR, exist_ok=True)
+        rgb_frames = []
+
+        if args.viewer:
+            viewer = OpenCVViewer(config.TASK_CONFIG.TASK.TYPE)
+
+        failure_thresh = 0.9
+
+        if epoch == 0:
+            relevant_ob_keys = ["robot_head_depth", "nav_goal_at_base"]
+            skill_ordering = []
+            for s in policy.skills:
+                if (s not in skill_ordering) and (not is_navigate(s)) and (not is_reset_arm(s)):
+                    skill_ordering.append(s)
+            skill_ordering_dict = {s: np.zeros(len(skill_ordering)) for s in skill_ordering}
+
+            for i, s in enumerate(skill_ordering):
+                skill_ordering_dict[s][i] = 1
+
+            # import pdb; pdb.set_trace()
+            # Recompute obs space with new next_skill observation
+            new_obs_space_dict = env.observation_space.spaces.copy()
+            new_obs_space_dict["next_skill"] = spaces.Box(0, 1, (len(skill_ordering),), np.int32)
+            new_obs_space_dict["goal"] = spaces.Box(-np.inf, np.inf, (3,), np.int32)
+            new_observation_space = spaces.Dict(new_obs_space_dict)
+
+            # Compute config stages and aliases
+            config_stages = list(config.TASK_CONFIG.TASK.StageSuccess.GOALS.keys())
+            config_stage_aliases = [s for s in policy.skill_sequence if (not is_navigate(s)) and (not is_reset_arm(s)) and (not is_next_target(s))]
+            config_stage_alias_dict = {config_stage_aliases[i]: config_stages[i] for i in range(len(config_stage_aliases))}
+
+            belief_classifier = TrainBeliefClassifier(observation_space=new_observation_space, action_space=env.action_space, prefix=config.TASK_CONFIG.TASK.TYPE, device=args.device, reload=True, runtype="toy")
+            energy_sampler = EnergyGoalSampler(belief_classifier) 
 
         if epoch % num_epoch_trajs == 0:
             ob_trajectories = []
             next_skill_fails = []
 
-        reload = False
-        found_eval = False
-        for i_ep in range(100):
-            if found_eval:
-                break
-            ob = env.reset()
-            policy.reset(ob)
+        # for i_ep in range(4):
+        #     ob = env.reset()
+        #     policy.reset(ob)
 
-            episode_reward = 0.0
-            info = {}
-            episode_id = env.current_episode.episode_id
-            
-            # Skip episode and keep reproducibility
-            if int(episode_id) != int(eval_episode_id):
-                continue
-            else:
-                found_eval = True
-            current_skill = None
-            current_skills = []
-            post_nav_skills = []
-            while True:
-                if current_skill != policy.current_skill_name: 
-                    if is_navigate(policy.current_skill_name):
-                        ob_trajectories.append([])
-                        post_nav_skills.append(None)
+        #     episode_reward = 0.0
+        #     info = {}
+        #     rgb_frames = []
+        #     episode_id = env.current_episode.episode_id
+        #     scene_id = env.current_episode.scene_id
 
-                    if not is_reset_arm(current_skill):
-                        prev_skill = current_skill
-                    current_skill = policy.current_skill_name
-                    current_skills.append(current_skill)
+        #     # Skip episode and keep reproducibility
+        #     if eval_episode_ids is not None and episode_id not in eval_episode_ids:
+        #         print("Skip episode", episode_id)
+        #         continue
 
-                if is_navigate(prev_skill) and not is_reset_arm(current_skill):
-                    post_nav_skills[-1] = current_skill
+        #     current_skill = None
+        #     current_skills = []
+        #     post_nav_skills = []
+        #     while True:
+        #         # close_0
+        #         # and also get next_skill
+                    
+        #         step_action = policy.act(ob)
+        #         if step_action is None:
+        #             print("Terminate the episode given none action")
+        #             break
+
+        #         # -------------------------------------------------------------------------- #
+        #         # Visualization
+        #         # -------------------------------------------------------------------------- #
+        #         if args.viewer or args.save_video:
+        #             # Add additional info
+        #             info["values"] = step_action.get("values")
+        #             info["value"] = step_action.get("value")
+        #             info["success_probs"] = step_action.get("success_probs")
+
+        #             metrics = extract_scalars_from_info(info)
+        #             if args.render_mode == "human":
+        #                 frame = env.render(
+        #                     "human",
+        #                     info=metrics,
+        #                     overlay_info=False,
+        #                     show_info=args.render_info,
+        #                 )
+        #             else:
+        #                 frame = env.render(args.render_mode)
+        #                 if args.render_info:
+        #                     frame = put_info_on_image(
+        #                         frame, info=metrics, overlay=False
+        #                     )
+        #         # -------------------------------------------------------------------------- #
+
+        #         if current_skill != policy.current_skill_name: 
+        #             if is_navigate(policy.current_skill_name):
+        #                 ob_trajectories.append([])
+        #                 post_nav_skills.append(None)
+
+        #             if not is_reset_arm(current_skill):
+        #                 prev_skill = current_skill
+        #             current_skill = policy.current_skill_name
+        #             current_skills.append(current_skill)
+
+        #         if is_navigate(prev_skill) and not is_reset_arm(current_skill):
+        #             post_nav_skills[-1] = current_skill
                 
-                if is_navigate(policy.current_skill_name):
-                    old_ob = {k: ob[k] for k in relevant_ob_keys}
-                    old_ob["next_skill"] = skill_ordering_dict[policy.skill_sequence[policy._skill_idx + 2]]
-                    old_ob["goal"] = get_goal_position(env)
-                    ob_trajectories[-1].append(old_ob)
+        #         if is_navigate(policy.current_skill_name):
+        #             old_ob = {k: ob[k] for k in relevant_ob_keys}
+        #             old_ob["next_skill"] = skill_ordering_dict[policy.skill_sequence[policy._skill_idx + 2]]
+        #             old_ob["goal"] = get_goal_position(env)
+        #             ob_trajectories[-1].append(old_ob)
+
+        #         if is_navigate(policy.current_skill_name):
+        #             old_ob = {k: ob[k] for k in relevant_ob_keys}
+        #             next_skill = policy.skill_sequence[policy._skill_idx + 2] 
+        #             old_ob["next_skill"] = skill_ordering_dict[next_skill]
+        #             old_ob["goal"] = get_goal_position(env)
+        #             ob_trajectories[-1].append(old_ob)
                     
-                step_action = policy.act(ob)
+        #             failure_prob = belief_classifier.run_model_sub_traj(ob_trajectories[-1])[-1].item()
+        #             next_skill = policy.skill_sequence[policy._skill_idx + 2]
+        #             # if is_navigate(policy.current_skill_name) and next_skill == "CloseDrawerRLSkill":
+        #             if (failure_prob > failure_thresh) and (len(ob_trajectories[-1]) % goal_sample_episode == 1) and next_skill == "CloseDrawerRLSkill":
+        #                 goal = get_goal_position(env)
+        #                 new_goal = energy_sampler.sample_goal(ob_trajectories[-1], goal)
+        #                 set_goal_position(env, new_goal)
+        #                 for i in range(len(ob_trajectories[-1])):
+        #                     ob_trajectories[-1][i]["goal"] = new_goal
 
-                if step_action is None:
-                    break
-
-                ob, reward, done, info = env.step(step_action)
-                    
-                episode_reward += reward
-                if done:
-                    break
-            
-            next_skill_fails += [not info["stage_success"][config_stage_alias_dict[s]] for s in post_nav_skills]
-
-        env.close()
-
-        if (epoch + 1) % num_epoch_trajs == 0:
-            belief_classifier.train_failure_belief_classifier(ob_trajectories, next_skill_fails)
-            belief_classifier.save_train_info()
+        #         ob, reward, done, info = env.step(step_action)
+        #         episode_reward += reward
+        #         if done:
+        #             break
+        #     # -------------------------------------------------------------------------- #
+        #     # Update stats
+        #     # -------------------------------------------------------------------------- #
+        #     metrics = extract_scalars_from_info(info)
+        #     episode_stats = metrics.copy()
+        #     episode_stats["return"] = episode_reward
+        #     all_episode_stats.append(episode_stats)
+        #     next_skill_fails += [not info["stage_success"][config_stage_alias_dict[s]] for s in post_nav_skills]
+        # env.close()
+        # if (epoch + 1) % num_epoch_trajs == 0:
+        #     belief_classifier.train_failure_belief_classifier(ob_trajectories, next_skill_fails)
+        #     belief_classifier.save_train_info(ob_trajectories, next_skill_fails, write_sep_file=True)
 
 if __name__ == "__main__":
     main()
