@@ -1,5 +1,6 @@
 __BASE__: "{fileDirname}/../__base__.py"
 BASE_RUN_DIR: "data/results/rearrange/skills/set_table/{fileName}"
+BASE_TASK_CONFIG_PATH: "configs/rearrange/tasks/composite/set_table.yaml"
 
 TASK_CONFIG:
   DATASET:

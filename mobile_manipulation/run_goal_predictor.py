@@ -27,6 +27,7 @@ from mobile_manipulation.utils.common import (
 )
 from mobile_manipulation.utils.wrappers import HabitatActionWrapperV1
 from mobile_manipulation.goal_failure_belief.goal_actor_critic.goal_actor_critic_skill_sequence import TrainGoalActorCritic
+from mobile_manipulation.goal_failure_belief.goal_actor_critic.bilinear_goal_actor_critic_skill_sequence import TrainBilinearGoalActorCritic
 from mobile_manipulation.utils.common import warn
 
 def preprocess_config(config_path: str, config: Config):
@@ -188,14 +189,13 @@ def main():
     config.defrost()
     if args.split is not None:
         config.TASK_CONFIG.DATASET.SPLIT = args.split
-    if not args.shuffle:
-        config.TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.SHUFFLE = False
-        config.TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.GROUP_BY_SCENE = False
-    if args.no_rgb:
-        sensors = config.TASK_CONFIG.SIMULATOR.AGENT_0.SENSORS
-        config.TASK_CONFIG.SIMULATOR.AGENT_0.SENSORS = [
-            x for x in sensors if "RGB" not in x
-        ]
+    # if not args.shuffle:
+    #     config.TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.SHUFFLE = False
+    #     config.TASK_CONFIG.ENVIRONMENT.ITERATOR_OPTIONS.GROUP_BY_SCENE = False
+    sensors = config.TASK_CONFIG.SIMULATOR.AGENT_0.SENSORS
+    config.TASK_CONFIG.SIMULATOR.AGENT_0.SENSORS = [
+        x for x in sensors if "RGB" not in x
+    ]
     config.TASK_CONFIG.SEED = seed
     config.freeze()
 
@@ -218,7 +218,8 @@ def main():
     if args.split == "val":
         trainer = TrainGoalActorCriticFixedEnv(composite_task_config=config, skill_config=skill_config, seed=seed, gpu_id=gpu_id)
     else:
-        trainer = TrainGoalActorCritic(composite_task_config=config, skill_config=skill_config, seed=seed, gpu_id=gpu_id)
+        # trainer = TrainGoalActorCritic(composite_task_config=config, skill_config=skill_config, seed=seed, gpu_id=gpu_id)
+        trainer = TrainBilinearGoalActorCritic(composite_task_config=config, skill_config=skill_config, seed=seed, gpu_id=gpu_id)
     trainer.train()
 
 if __name__ == "__main__":

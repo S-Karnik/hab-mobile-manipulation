@@ -61,7 +61,7 @@ def construct_envs(
     workers_ignore_signals: bool = False,
     auto_reset_done: bool = True,
     wrappers: List[gym.Wrapper] = (),
-    debug = True,
+    debug = False,
 ) -> VectorEnv:
     r"""Create VectorEnv object with specified config and env class type.
     To allow better performance, dataset are split into small ones for
@@ -80,7 +80,8 @@ def construct_envs(
         VectorEnv object created according to specification.
     """
 
-    num_envs = config.NUM_ENVIRONMENTS
+    # num_envs = config.NUM_ENVIRONMENTS
+    num_envs = 42
     configs = []
     env_classes = [env_class] * num_envs
 
@@ -126,6 +127,7 @@ def construct_envs(
         env_fn_args=tuple(zip(configs, env_classes, [wrappers] * num_envs)),
         workers_ignore_signals=workers_ignore_signals,
         auto_reset_done=auto_reset_done,
+        expand_args=True
     )
     return envs
 
@@ -157,7 +159,7 @@ def construct_envs_multi_config(
     """
 
     # num_envs = skill_config.NUM_ENVIRONMENTS
-    num_envs = 16
+    num_envs = 32
     configs = []
     env_classes = [env_class] * num_envs
 

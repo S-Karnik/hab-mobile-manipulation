@@ -134,8 +134,6 @@ class GripperStatusMeasureV1(GripperStatusMeasure):
                     self.status = GripperStatus.PICK_CORRECT
                 else:
                     self.status = GripperStatus.PICK_WRONG
-                    # print("pick wrong", self._sim.gripper.grasped_marker_id)
-                    # print("pick wrong", self._sim.gripper.grasped_obj_id)
         else:
             if self.status in [
                 GripperStatus.PICK_CORRECT,
@@ -202,7 +200,7 @@ class OutOfRegionPenalty(MyMeasure):
 class RearrangeSetMarkerReward(MyMeasure):
     cls_uuid = "rearrange_set_reward"
 
-    def reset_metric(self, *args, task: RearrangeTask, **kwargs):
+    def reset_metric(self, *args, task: RearrangeTask, early_terminate: bool = True, **kwargs):
         if not kwargs.get("no_dep", False):
             task.measurements.check_measure_dependencies(
                 self.uuid,
@@ -217,9 +215,9 @@ class RearrangeSetMarkerReward(MyMeasure):
         self.prev_dist_to_goal = None  # gripper
         self.prev_dist_to_goal2 = None  # marker
         self.prev_success = False
-        self.update_metric(*args, task=task, **kwargs)
+        self.update_metric(*args, task=task, early_terminate=early_terminate, **kwargs)
 
-    def update_metric(self, *args, task: RearrangeTask, **kwargs):
+    def update_metric(self, *args, task: RearrangeTask, early_terminate: bool = False, **kwargs):
         measures = task.measurements.measures
 
         marker_to_goal_dist = measures[
@@ -247,7 +245,7 @@ class RearrangeSetMarkerReward(MyMeasure):
 
         if gripper_status == GripperStatus.PICK_WRONG:
             reward -= self._config.PICK_PENALTY
-            if self._config.END_PICK_WRONG:
+            if (early_terminate or self._config.END_PICK_WRONG):
                 task._is_episode_active = False
                 task._is_episode_truncated = self._config.get(
                     "TRUNCATE_PICK_WRONG", False
@@ -257,7 +255,11 @@ class RearrangeSetMarkerReward(MyMeasure):
             pass
 
         if gripper_status == GripperStatus.HOLDING_WRONG:
-            raise RuntimeError
+            if (early_terminate or self._config.END_DROP):
+                task._is_episode_active = False
+                task._is_episode_truncated = self._config.get(
+                    "TRUNCATE_DROP", False
+                )
 
         if gripper_status == GripperStatus.DROP:
             if set_marker_success:
@@ -265,7 +267,7 @@ class RearrangeSetMarkerReward(MyMeasure):
                     reward += self._config.DROP_REWARD
             else:
                 reward -= self._config.DROP_PENALTY
-                if self._config.END_DROP:
+                if (early_terminate or self._config.END_DROP):
                     task._is_episode_active = False
                     task._is_episode_truncated = self._config.get(
                         "TRUNCATE_DROP", False
@@ -299,7 +301,7 @@ class RearrangeSetMarkerReward(MyMeasure):
                 reward += self._config.SUCC_REWARD
         else:
             self.prev_dist_to_goal = gripper_to_marker_dist
-            if self.prev_success:
+            if (early_terminate and self.prev_success):
                 task._is_episode_active = False
                 # print("Interesting things happen:", marker_to_goal_dist)
                 task._is_episode_truncated = self._config.get(
@@ -324,7 +326,7 @@ class RearrangeSetMarkerReward(MyMeasure):
 
 @registry.register_measure
 class RearrangeSetMarkerRewardV1(RearrangeSetMarkerReward):
-    def update_metric(self, *args, task: RearrangeTask, **kwargs):
+    def update_metric(self, *args, task: RearrangeTask, early_terminate: bool = False, thresh = -1, **kwargs):
         measures = task.measurements.measures
 
         marker_to_goal_dist = measures[
@@ -341,7 +343,10 @@ class RearrangeSetMarkerRewardV1(RearrangeSetMarkerReward):
         gripper_status = gs_measure.status
         n_pick_correct = gs_measure.get_metric()["pick_correct"]
         n_drop = gs_measure.get_metric()["drop"]
+        # if thresh > 0:
         set_marker_success = measures[SetMarkerSuccess.cls_uuid].get_metric()
+        # else:
+        #     set_marker_success =  marker_to_goal_dist < thresh  # measures[SetMarkerSuccess.cls_uuid].get_metric()
         # print("gripper_status", gripper_status)
 
         reward = 0.0
@@ -352,7 +357,7 @@ class RearrangeSetMarkerRewardV1(RearrangeSetMarkerReward):
 
         if gripper_status == GripperStatus.PICK_WRONG:
             reward -= self._config.PICK_PENALTY
-            if self._config.END_PICK_WRONG:
+            if (early_terminate or self._config.END_PICK_WRONG):
                 task._is_episode_active = False
                 task._is_episode_truncated = self._config.get(
                     "TRUNCATE_PICK_WRONG", False
@@ -377,7 +382,7 @@ class RearrangeSetMarkerRewardV1(RearrangeSetMarkerReward):
                 reward += diff_dist2 * self._config.DIST_REWARD
             self.prev_dist_to_goal2 = marker_to_goal_dist
 
-        if gripper_status == GripperStatus.HOLDING_WRONG:
+        if (not early_terminate) and (gripper_status == GripperStatus.HOLDING_WRONG):
             raise RuntimeError
 
         if gripper_status == GripperStatus.DROP:
@@ -386,7 +391,7 @@ class RearrangeSetMarkerRewardV1(RearrangeSetMarkerReward):
                     reward += self._config.DROP_REWARD
             else:
                 reward -= self._config.DROP_PENALTY
-                if self._config.END_DROP:
+                if (early_terminate or self._config.END_DROP):
                     task._is_episode_active = False
                     task._is_episode_truncated = self._config.get(
                         "TRUNCATE_DROP", False

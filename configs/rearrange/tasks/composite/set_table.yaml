@@ -33,6 +33,7 @@ TASK:
     # nav
     - NavGoalSensor
     # manip
+    - ObjectOrientationSensor
     - ArmJointPositionSensor
     - GripperPositionSensor
     - IsGraspedSensor
@@ -42,18 +43,75 @@ TASK:
     - PlaceGoalSensor2
 
   MEASUREMENTS:
+    # - ObjectToGoalDistance
     - GripperToRestingDistance
+    # - MarkerToGoalDistance
+    # - GripperToObjectDistance
+    # - GripperToMarkerDistance
     - InvalidGrasp
     - GripperStatus
+    # - GripperStatusV1
+    # - RobotForce
+    # - ForcePenalty
+    # - InvalidGraspPenalty
+    # - SetMarkerSuccess
+    # - PlaceObjectSuccess
     - StageSuccess
+    # - CompositeReward
+  
+  ObjectToGoalDistance:
+    TYPE: ObjectToGoalDistance
+  GripperToRestingDistance:
+    TYPE: GripperToRestingDistance
+  MarkerToGoalDistance:
+    TYPE: MarkerToGoalDistance
+    USE_ABS: True
+  GripperToMarkerDistance:
+    TYPE: GripperToMarkerDistance
+  GripperToObjectDistance:
+    TYPE: GripperToObjectDistance
+
+  InvalidGrasp:
+    # TYPE: InvalidGrasp
+    TYPE: InvalidGrasp
+    MULTISKILL: True
+
+  GripperStatus:
+    TYPE: GripperStatus
+      
+  GripperStatusV1:
+    TYPE: GripperStatusV1
+
+  RobotForce:
+    TYPE: RobotForce
+    MIN_DELTA_FORCE: 20.0
+    INCLUDE_OBJ_COLLISIONS: False
+    MULTISKILL: True
+
+  ForcePenalty:
+    TYPE: ForcePenalty
+    FORCE_PENALTY: 0.001
+    MAX_FORCE_PENALTY: 0.2
+    MAX_ACCUM_FORCE: -1.0
+    MAX_ACCUM_FORCE_PENALTY: 1.0
+    MULTISKILL: True
+  
+  InvalidGraspPenalty:
+    TYPE: InvalidGraspPenalty
+    PENALTY: 1.0
+    END_EPISODE: False
+    MULTISKILL: True
 
   GripperToRestingDistance:
     TYPE: GripperToRestingDistance
-  InvalidGrasp:
-    # TYPE: InvalidGrasp
-    TYPE: InvalidGraspV1
-  GripperStatus:
-    TYPE: GripperStatus
+
+  SetMarkerSuccess:
+    TYPE: SetMarkerSuccess
+    THRESHOLD: 0.15
+
+  PlaceObjectSuccess:
+    TYPE: PlaceObjectSuccess
+    THRESHOLD: 0.15
 
   StageSuccess:
     TYPE: StageSuccess
@@ -89,3 +147,156 @@ TASK:
         - "at(target_obj_pos|0,target_goal_pos|0)"
         - "closed_fridge(target_marker|1)"
         - "at(target_obj_pos|1,target_goal_pos|1)"
+
+  CompositeReward:
+    TYPE: CompositeReward
+    STAGE_REWARD: 2.5
+    MEASUREMENTS:
+      - OpenDrawerReward
+      - CloseDrawerReward
+      - OpenCloseFridgeReward
+      - PickReward
+      - PlaceReward
+    
+    STAGE_MEASURES:
+      open_0:
+        - OpenDrawerReward
+      pick_0:
+        - PickReward
+      place_0:
+        - PlaceReward
+      close_0:
+        - CloseDrawerReward
+      open_1:
+        - OpenCloseFridgeReward
+      pick_1:
+        - PickReward
+      place_1:
+        - PlaceReward
+      close_1:
+        - OpenCloseFridgeReward
+
+    SLACK_REWARDS:
+      open_0: 0.0
+      pick_0: -0.002
+      place_0: -0.002
+      close_0: 0.0
+      open_1: 0.0
+      pick_1: -0.002
+      place_1: -0.002
+      close_1: 0.0
+
+    MARKER_THRESHOLDS:
+      open_0: 0.15
+      pick_0: 0
+      place_0: 0
+      close_0: 0.15
+      open_1: 0.05
+      pick_1: 0.0
+      place_1: 0.0
+      close_1: 0.05
+
+    GripperToObjectDistance:
+      TYPE: GripperToObjectDistance
+    ObjectToGoalDistance:
+      TYPE: ObjectToGoalDistance
+    GripperToRestingDistance:
+      TYPE: GripperToRestingDistance
+    MarkerToGoalDistance:
+      TYPE: MarkerToGoalDistance
+      USE_ABS: True
+
+    InvalidGrasp:
+      # TYPE: InvalidGrasp
+      TYPE: InvalidGrasp
+    GripperStatus:
+      TYPE: GripperStatus
+
+    GripperStatusV1:
+      TYPE: GripperStatusV1
+
+    RobotForce:
+      TYPE: RobotForce
+      MIN_DELTA_FORCE: 20.0
+      INCLUDE_OBJ_COLLISIONS: True
+
+    ForcePenalty:
+      TYPE: ForcePenalty
+      FORCE_PENALTY: 0.001
+      MAX_FORCE_PENALTY: 0.2
+      MAX_ACCUM_FORCE: -1.0
+      MAX_ACCUM_FORCE_PENALTY: 1.0
+      MULTISKILL: True
+    
+    InvalidGraspPenalty:
+      TYPE: InvalidGraspPenalty
+      PENALTY: 1.0
+      END_EPISODE: False
+    
+    PlaceObjectSuccess:
+      TYPE: PlaceObjectSuccess
+      THRESHOLD: 0.15
+
+    RearrangePlaceSuccess:
+      TYPE: RearrangePlaceSuccess
+      THRESHOLD: 0.05
+
+    RearrangePickSuccess:
+      TYPE: RearrangePickSuccess
+      THRESHOLD: 0.05
+
+    OpenCloseFridgeReward:
+      TYPE: RearrangeSetMarkerReward
+      DIST_REWARD: 2.0
+      SUCC_REWARD: 0.0
+      PICK_REWARD: 1.0
+      PICK_PENALTY: 1.0
+      END_PICK_WRONG: False
+      DROP_REWARD: 1.0
+      DROP_PENALTY: 0.0
+      END_DROP: False
+      MULTISKILL: True
+
+    OpenDrawerReward:
+      TYPE: RearrangeSetMarkerRewardV1
+      DIST_REWARD: 2.0
+      SUCC_REWARD: 0.0
+      PICK_REWARD: 1.0
+      PICK_PENALTY: 1.0
+      END_PICK_WRONG: False
+      DROP_REWARD: 1.0
+      DROP_PENALTY: 0.0
+      END_DROP: False
+      MAX_QVEL: 0.1
+      MULTISKILL: True
+
+    CloseDrawerReward:
+      TYPE: RearrangeSetMarkerReward
+      DIST_REWARD: 2.0
+      SUCC_REWARD: 0.0
+      PICK_REWARD: 1.0
+      PICK_PENALTY: 1.0
+      END_PICK_WRONG: False
+      DROP_REWARD: 1.0
+      DROP_PENALTY: 0.0
+      END_DROP: False
+      MULTISKILL: True
+
+    PickReward:
+      TYPE: RearrangePickReward
+      DIST_REWARD: 4.0
+      USE_DIFF: True
+      PICK_REWARD: 1.0
+      PICK_PENALTY: 1.0
+      DROP_PENALTY: 1.0
+      MULTISKILL: True
+
+    PlaceReward:
+      TYPE: RearrangePlaceRewardV1
+      DIST_REWARD: 4.0
+      USE_DIFF: True
+      RELEASE_REWARD: 1.0
+      RELEASE_PENALTY: 0.1
+      PICK_PENALTY: 0.1
+      END_DROP: False
+      MULTISKILL: True

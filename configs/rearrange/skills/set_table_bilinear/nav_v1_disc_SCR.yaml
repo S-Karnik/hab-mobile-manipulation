@@ -1,0 +1,29 @@
+__BASE__: "{fileDirname}/nav_v0_disc_SCR.yaml"
+BASE_TASK_CONFIG_PATH: "configs/rearrange/tasks/nav_v1.yaml"
+
+RL:
+  REWARD_MEASURES:
+    - "rearrange_nav_reward"
+    - "force_penalty"
+
+GOAL:
+  TRAINER_NAME: "skill-goal-bilinear-ppo-v0"
+  POLICY:
+    name: BilinearCRPolicy
+    BilinearCRNet:
+      rgb_uuids: []
+      depth_uuids:
+        - "robot_head_depth"
+      goal_dep_state_uuids:
+        - "nav_goal_at_base"
+      goal_ind_state_uuids: []
+      hidden_size: 256
+      state_hidden_sizes: []
+      rnn_hidden_size: 128
+    
+    GAUSSIAN_ACTOR:
+      std_init_bias: -1.0
+      pre_bilinear_size: 64
+    BASE_CHECKPOINT_PATH: "data/results/rearrange/skills/set_table_bilinear/nav_v1_disc_SCR/checkpoints/ckpt.66.pth"
+    CHECKPOINT_FOLDER: "data/results/rearrange/skills/set_table_bilinear/nav_v1_disc_SCR/goal_checkpoints/"
+    TENSORBOARD_DIR: "data/results/rearrange/skills/set_table_bilinear/nav_v1_disc_SCR/goal_tb/"

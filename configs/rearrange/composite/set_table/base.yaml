@@ -16,6 +16,8 @@ SOLUTION:
     - CloseDrawerRLSkill
     - OpenFridgeRLSkill
     - CloseFridgeRLSkill
+    - PlaceTranslate
+    - PlaceReorient
     - ResetArm
     - NextTarget
 
@@ -30,6 +32,8 @@ SOLUTION:
     - NavRLSkill
     - ResetArm
     - PlaceRLSkill
+    - PlaceTranslate
+    - PlaceReorient
     - ResetArm
     - NavRLSkill
     - ResetArm
@@ -50,6 +54,8 @@ SOLUTION:
     - NavRLSkill
     - ResetArm
     - PlaceRLSkill
+    - PlaceTranslate
+    - PlaceReorient
     - ResetArm
     - NavRLSkill
     - ResetArm
@@ -59,6 +65,18 @@ SOLUTION:
   ResetArm:
     TYPE: ResetArm
     TIMEOUT: 50
+
+  # PlaceGTNav:
+  #   TYPE: PlaceGTNav
+  #   TIMEOUT: 500
+
+  PlaceTranslate:
+    TYPE: PlaceTranslate
+    TIMEOUT: 500
+    
+  PlaceReorient:
+    TYPE: PlaceReorient
+    TIMEOUT: 500
 
   NextTarget:
     TYPE: NextTarget

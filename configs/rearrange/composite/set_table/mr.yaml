@@ -1,5 +1,7 @@
 __BASE__: "{fileDirname}/base.yaml"
 
+FULL_CKPT_NAME: "default-skills"
+
 SOLUTION:
   NavRLSkill:
     TYPE: NavRLSkill
@@ -17,10 +19,10 @@ SOLUTION:
     THRESHOLD: 0.05
 
   PlaceRLSkill:
-    TYPE: PlaceRLSkill
+    TYPE: BilinearPlaceRLSkill
     ACTION: BaseArmGripperAction2
-    CKPT_PATH: "data/results/rearrange/skills/tidy_house/place_v1_joint_SCR/seed=100/checkpoints/ckpt.10.pth"
-    TIMEOUT: 200
+    CKPT_PATH: "data/results/rearrange/skills/tidy_house_bilinear/place_v1_joint_SCR/checkpoints/ckpt.100.pth"
+    TIMEOUT: 300
     END_TYPE: "obs"
     THRESHOLD: 0.05
 

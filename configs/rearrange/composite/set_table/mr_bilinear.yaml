@@ -1,0 +1,63 @@
+__BASE__: "{fileDirname}/base.yaml"
+
+FULL_CKPT_NAME: "goal-bilinear-dense-rew"
+
+SOLUTION:
+  NavRLSkill:
+    TYPE: BilinearNavRLSkill
+    ACTION: BaseDiscVelAction
+    CKPT_PATH: "data/results/rearrange/skills/set_table_bilinear/nav_v1_disc_SCR/checkpoints/ckpt.100.pth"
+    TIMEOUT: 500
+    END_TYPE: "call_stop"
+
+  PickDrRLSkill:
+    TYPE: BilinearPickRLSkill
+    ACTION: BaseArmGripperAction2
+    CKPT_PATH: "data/results/rearrange/skills/set_table_bilinear/pick_v1_drawer_joint_SCR/checkpoints/ckpt.80.pth"
+    TIMEOUT: 200
+    END_TYPE: "obs"
+    THRESHOLD: 0.05
+
+  PlaceRLSkill:
+    TYPE: BilinearPlaceRLSkill
+    ACTION: BaseArmGripperAction2
+    CKPT_PATH: "data/results/rearrange/skills/tidy_house_bilinear/place_v1_joint_SCR/checkpoints/ckpt.100.pth"
+    TIMEOUT: 300
+    END_TYPE: "obs"
+    THRESHOLD: 0.05
+
+  OpenDrawerRLSkill:
+    TYPE: BilinearSetMarkerRLSkill
+    ACTION: BaseArmGripperAction2
+    CKPT_PATH: "data/results/rearrange/skills/set_table_bilinear/open_drawer_v0A_joint_SCR/checkpoints/ckpt.100.pth"
+    TIMEOUT: 200
+    THRESHOLD: 0.15
+
+  CloseDrawerRLSkill:
+    TYPE: BilinearSetMarkerRLSkill
+    ACTION: BaseArmGripperAction2
+    CKPT_PATH: "data/results/rearrange/skills/set_table_bilinear/close_drawer_v0A_joint_SCR/checkpoints/ckpt.100.pth"
+    TIMEOUT: 200
+    THRESHOLD: 0.15
+
+  PickFrRLSkill:
+    TYPE: BilinearPickRLSkill
+    ACTION: BaseArmGripperAction2
+    CKPT_PATH: "data/results/rearrange/skills/prepare_groceries_bilinear/pick_v1_joint_SCR/checkpoints/ckpt.100.pth"
+    TIMEOUT: 200
+    END_TYPE: "obs"
+    THRESHOLD: 0.05
+ 
+  OpenFridgeRLSkill:
+    TYPE: BilinearSetMarkerRLSkill
+    ACTION: BaseArmGripperAction2
+    CKPT_PATH: "data/results/rearrange/skills/set_table_bilinear/open_fridge_v0A_joint_SCR/checkpoints/ckpt.100.pth"
+    TIMEOUT: 200
+    THRESHOLD: 0.15
+
+  CloseFridgeRLSkill:
+    TYPE: BilinearSetMarkerRLSkill
+    ACTION: BaseArmGripperAction2
+    CKPT_PATH: "data/results/rearrange/skills/set_table_bilinear/close_fridge_v0A_joint_SCR/checkpoints/ckpt.38.pth"
+    TIMEOUT: 200
+    THRESHOLD: 0.15

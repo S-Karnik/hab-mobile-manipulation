@@ -51,8 +51,8 @@ class TrainBeliefClassifier:
             torch.random.set_rng_state(state_dict['torch_random_state'])
             random.setstate(state_dict['py_random_state'])
         
-    def _compute_ground_truth_beliefs(self, next_skill_fails, batch_size, num_steps=MAX_STEPS):
-        ground_truth = np.full((batch_size, num_steps), next_skill_fails) * 1.0
+    def _compute_ground_truth_beliefs(self, next_skill_fails, num_steps=MAX_STEPS, batch_size=1):
+        ground_truth = np.full((num_steps, batch_size), next_skill_fails) * 1.0
         return torch.from_numpy(ground_truth).to(self._device)
     
     def before_step(self) -> None:
@@ -63,9 +63,7 @@ class TrainBeliefClassifier:
     def train_failure_belief_classifier(self, trajectories, next_skill_fails):
         self._belief_model.train()
         criterion = nn.BCELoss()
-        indices = np.random.permutation(len(trajectories))
-        for i in indices:
-            sub_traj = trajectories[i]
+        for i, sub_traj in enumerate(trajectories):
             self._optimizer.zero_grad()
             T = len(sub_traj)
             batch = batch_obs(sub_traj, device=self._device)
@@ -89,6 +87,42 @@ class TrainBeliefClassifier:
             self._losses += loss.item()
             self._num_sub_traj += 1
 
+    def run_model_batch_sub_traj(self, sub_trajs):
+        N = len(sub_trajs)
+        T = len(sub_trajs[0])
+        batched_sub_trajs = sum(sub_trajs, [])
+        batch = batch_obs(batched_sub_trajs, device=self._device)
+        step_batch = dict(observations=batch, recurrent_hidden_states=torch.zeros(
+            T,
+            self._belief_model._crnn.num_recurrent_layers,
+            self._belief_model._crnn.rnn_hidden_size,
+            device=self._device
+        ), masks=torch.ones(
+            N,
+            T,
+            device=self._device,
+            dtype=torch.bool,
+        ))
+        predictions = self._belief_model(step_batch).view(N, T)
+        return predictions
+
+    def run_model_sub_traj(self, sub_traj):
+        N = len(sub_traj)
+        batch = batch_obs(sub_traj, device=self._device)
+        step_batch = dict(observations=batch, recurrent_hidden_states=torch.zeros(
+            1,
+            self._belief_model._crnn.num_recurrent_layers,
+            self._belief_model._crnn.rnn_hidden_size,
+            device=self._device
+        ), masks=torch.ones(
+            N,
+            1,
+            device=self._device,
+            dtype=torch.bool,
+        ))
+        predictions = self._belief_model(step_batch).view(N, 1)
+        return predictions
+
     def eval_model(self, trajectories, next_skill_fails):
         total_loss = 0
         num_sub_traj = 0
@@ -104,13 +138,13 @@ class TrainBeliefClassifier:
                     self._belief_model._crnn.num_recurrent_layers,
                     self._belief_model._crnn.rnn_hidden_size,
                     device=self._device
-                ), masks=torch.zeros(
+                ), masks=torch.ones(
                     N,
                     1,
                     device=self._device,
                     dtype=torch.bool,
                 ))
-                predictions = self._belief_model(step_batch).view(N, 1)                
+                predictions = self._belief_model(step_batch).view(N, 1)
                 ground_truth = self._compute_ground_truth_beliefs(next_skill_fails[i], N, 1)
                 loss = criterion(predictions.float(), ground_truth.float())
                 total_loss += loss.item()

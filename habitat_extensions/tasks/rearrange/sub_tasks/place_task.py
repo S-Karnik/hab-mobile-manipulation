@@ -109,9 +109,12 @@ class RearrangePlaceTask(RearrangePickTask):
             )
             return None
 
-        pos_noise = self._config.get("BASE_NOISE", 0.05)
-        ori_noise = self._config.get("BASE_ANGLE_NOISE", 0.15)
-
+        pos_noise = self._config.get("OVERRIDE_BASE_NOISE", None)
+        if pos_noise is None:
+            pos_noise = self._config.get("BASE_NOISE", 0.05)
+        ori_noise = self._config.get("OVERRIDE_BASE_ANGLE_NOISE", None)
+        if ori_noise is None:
+            ori_noise = self._config.get("BASE_ANGLE_NOISE", 0.15)
         for i in range(max_trials):
             # Avoid extreme end-effector positions by resampling each time
             self._initialize_ee_pos()
@@ -196,9 +199,12 @@ class RearrangePlaceTaskV1(RearrangePlaceTask):
                 )
             )
             return None
-
-        pos_noise = self._config.get("BASE_NOISE", 0.05)
-        ori_noise = self._config.get("BASE_ANGLE_NOISE", 0.15)
+        pos_noise = self._config.get("OVERRIDE_BASE_NOISE", None)
+        if pos_noise is None:
+            pos_noise = self._config.get("BASE_NOISE", 0.05)
+        ori_noise = self._config.get("OVERRIDE_BASE_ANGLE_NOISE", None)
+        if ori_noise is None:
+            ori_noise = self._config.get("BASE_ANGLE_NOISE", 0.15)
 
         for i in range(max_trials):
             # Avoid extreme end-effector positions by resampling each time

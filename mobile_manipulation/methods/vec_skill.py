@@ -6,16 +6,19 @@ from habitat.core.vector_env import VectorEnv
 
 from mobile_manipulation.common.registry import (
     vmm_registry as my_registry,
+    vbmm_registry as bmy_registry,
 )
 
 
 class Skill:
-    def __init__(self, config: Config, vec_rl_env: VectorEnv, vec_rl_env_idx: int):
+    def __init__(self, config: Config, saved_actor_critics: dict, vec_rl_env: VectorEnv, vec_rl_env_idx: int):
         self._config = config
+        self._saved_actor_critics = saved_actor_critics
         self._vec_rl_env = vec_rl_env
         self._vec_rl_env_idx = vec_rl_env_idx
         self._obs_space = self._vec_rl_env.observation_spaces[self._vec_rl_env_idx]
         self._action_space = self._vec_rl_env.action_spaces[self._vec_rl_env_idx]
+        self.device = None
 
     def reset(self, obs, **kwargs):
         self._elapsed_steps = 0
@@ -68,10 +71,12 @@ class CompositeSkill(Skill):
         config: Config,
         vec_rl_env: VectorEnv,
         vec_rl_env_idx: int,
+        saved_actor_critics: dict
     ):
         self._config = config
         self._vec_rl_env = vec_rl_env
         self._vec_rl_env_idx = vec_rl_env_idx
+        self._saved_actor_critics = saved_actor_critics
 
         self.skill_sequence = config.get("SKILL_SEQUENCE", config.SKILLS)
         self.skills = self._init_entities(
@@ -97,7 +102,7 @@ class CompositeSkill(Skill):
             assert (
                 entity_type is not None
             ), f"invalid {entity_name} type {entity_cfg.TYPE}"
-            entities[entity_name] = entity_type(config=entity_cfg, **kwargs)
+            entities[entity_name] = entity_type(config=entity_cfg, saved_actor_critics=self._saved_actor_critics, **kwargs)
         return entities
 
     @property
@@ -141,7 +146,8 @@ class CompositeSkill(Skill):
     
     def to(self, device):
         for skill in self.skills.values():
-            skill.to(device)
+            if skill.device is None:
+                skill.to(device)
         return self
 
     def should_terminate(self, obs, **kwargs):

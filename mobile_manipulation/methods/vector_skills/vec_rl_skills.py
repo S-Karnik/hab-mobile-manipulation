@@ -22,28 +22,34 @@ class RLSkill(Skill):
         self.device = None
         self.action_shape = self._action_space[self._config.ACTION].shape
         self.skill_index = self._config.get("SKILL_INDEX", "")
-        self._init_policy(self._config.CKPT_PATH, self.skill_index)
+        self._init_policy(self._config.CKPT_PATH, self.skill_index, self._saved_actor_critics)
 
-    def _init_policy(self, ckpt_path: str, skill_idx: str = ""):
-        ckpt_dict = torch.load(ckpt_path, map_location="cpu")
-        print(f"Loaded checkpoint from {ckpt_path}")
+    def _init_policy(self, ckpt_path: str, skill_idx: str = "", saved_actor_critics={}):
+        if (ckpt_path, skill_idx) not in saved_actor_critics:
+            ckpt_dict = torch.load(ckpt_path, map_location="cpu")
+            print(f"Loaded checkpoint from {ckpt_path}")
 
-        ckpt_config = ckpt_dict["config"]
-        action_space = self._action_space[self._config.ACTION]
-        policy_config = ckpt_config.RL["POLICY" + skill_idx]
-        policy = baseline_registry.get_policy(policy_config.name)
-        # import pdb; pdb.set_trace()
-        actor_critic: ActorCritic = policy.from_config(
-            policy_config, self._obs_space, action_space
-        )
+            ckpt_config = ckpt_dict["config"]
+            action_space = self._action_space[self._config.ACTION]
+            policy_config = ckpt_config.RL["POLICY" + skill_idx]
+            policy = baseline_registry.get_policy(policy_config.name)
+            actor_critic = policy.from_config(
+                policy_config, self._obs_space, action_space
+            )
 
-        state_dict = ckpt_dict["state_dict" + skill_idx]
-        state_dict = get_state_dict_by_prefix(state_dict, "actor_critic.")
-        actor_critic.load_state_dict(state_dict)
-        actor_critic.eval()
+            state_dict = ckpt_dict["state_dict" + skill_idx]
+            state_dict = get_state_dict_by_prefix(state_dict, "actor_critic.")
+            actor_critic.load_state_dict(state_dict)
+            actor_critic.eval()
 
-        self.actor_critic = actor_critic
-        self._ckpt_config = ckpt_config
+            self.actor_critic = actor_critic
+            self._ckpt_config = ckpt_config
+            saved_actor_critics[(ckpt_path, skill_idx)] = {}
+            saved_actor_critics[(ckpt_path, skill_idx)]["actor_critic"] = actor_critic
+            saved_actor_critics[(ckpt_path, skill_idx)]["ckpt_config"] = ckpt_config
+        else:
+            self.actor_critic = saved_actor_critics[(ckpt_path, skill_idx)]["actor_critic"]
+            self._ckpt_config = saved_actor_critics[(ckpt_path, skill_idx)]["ckpt_config"]
 
         # cache for convenience
         self.num_recurrent_layers = self.actor_critic.net.num_recurrent_layers
@@ -65,8 +71,11 @@ class RLSkill(Skill):
         with torch.no_grad():
             batch = batch_obs([obs], device=self.device)
             step_batch = dict(observations=batch, **self._buffer)
-            outputs = self.actor_critic.act(step_batch, deterministic=True)
+            outputs = self.actor_critic.act(step_batch, deterministic=True, include_entropy=True)
             action = outputs["action"]
+            action_log_probs = outputs["action_log_probs"]
+            all_action_log_probs = outputs["all_action_log_probs"]
+            entropy = outputs["entropy"]
             value = outputs["value"]
             self._buffer.update(
                 recurrent_hidden_states=outputs["rnn_hidden_states"],
@@ -80,7 +89,10 @@ class RLSkill(Skill):
         value = value.item()
         step_action = {
             "action": self._config.ACTION,
+            "action_log_probs": action_log_probs.cpu(),
+            "all_action_log_probs": all_action_log_probs.cpu(),
             "action_args": action,
+            "entropy": entropy,
             "value": value,
         }
         return step_action

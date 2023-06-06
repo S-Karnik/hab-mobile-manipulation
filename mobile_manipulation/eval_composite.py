@@ -1,4 +1,5 @@
 import argparse
+from collections import OrderedDict
 import json
 import os
 import os.path as osp
@@ -9,6 +10,7 @@ import numpy as np
 import torch
 from habitat import Config, logger
 from habitat_baselines.utils.common import batch_obs, generate_video
+from habitat_extensions.tasks.rearrange.composite_sensors import Predicate
 
 import mobile_manipulation.methods.skills
 from habitat_extensions.tasks.rearrange import RearrangeRLEnv
@@ -174,7 +176,6 @@ def main():
     env.seed(config.TASK_CONFIG.SEED)
     print("obs space", env.observation_space)
     print("action space", env.action_space)
-
     # -------------------------------------------------------------------------- #
     # Initialize policy
     # -------------------------------------------------------------------------- #
@@ -191,6 +192,7 @@ def main():
 
     done, info = True, {}
     all_episode_stats = []
+    all_state_successes = []
     episode_reward = 0
     failure_episodes = []
 
@@ -203,6 +205,10 @@ def main():
 
     for i_ep in range(num_episodes):
         ob = env.reset()
+        goals = OrderedDict(
+            (name, [Predicate(env.task, p) for p in predicates])
+            for name, predicates in config.TASK_CONFIG.TASK.StageSuccess.GOALS.items()
+        )
         policy.reset(ob)
 
         episode_reward = 0.0
@@ -278,6 +284,10 @@ def main():
                 episode_id, i_ep, num_episodes, episode_stats
             )
         )
+        achieved_goals = {}
+        for name, goal in goals.items():
+            achieved_goals[name] = [bool(p.is_satisfied()) for p in goal]
+        all_state_successes.append(achieved_goals)
 
         success = metrics.get(config.RL.SUCCESS_MEASURE, -1)
         is_failure = success == False
@@ -285,6 +295,8 @@ def main():
         if args.save_video == "all" or (
             args.save_video == "failure" and is_failure
         ):
+            num_successes = np.sum([info['stage_success'][stage] for stage in info['stage_success']])
+            # if (num_successes == 3) or (num_successes == 7):
             generate_video(
                 video_option=["disk"],
                 video_dir=config.VIDEO_DIR,
@@ -322,6 +334,9 @@ def main():
         json_path = config.LOG_FILE.replace("log.txt", "result.json")
         with open(json_path, "w") as f:
             json.dump(all_episode_stats, f, indent=2)
+        stage_success_json_path = config.LOG_FILE.replace("log.txt", "stage_success.json")
+        with open(stage_success_json_path, "w") as f:
+            json.dump(all_state_successes, f, indent=2)
 
 
 if __name__ == "__main__":

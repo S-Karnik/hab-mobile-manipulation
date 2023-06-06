@@ -1,6 +1,7 @@
 __BASE__: "{fileDirname}/open_drawer_v0.yaml"
 
 TASK:
+  TYPE: RearrangeCloseDrawerTask-v0
   SPAWN_REGION: [[0.3, -0.6], [1.0, 0.6]]
 
   POSSIBLE_ACTIONS:

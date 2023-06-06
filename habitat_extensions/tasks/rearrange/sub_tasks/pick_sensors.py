@@ -10,7 +10,7 @@ from ..sensors import (
     MyMeasure,
 )
 from ..task import RearrangeTask
-
+from .art_sensors import GripperStatusMeasureV1
 
 # -------------------------------------------------------------------------- #
 # Measure
@@ -63,7 +63,7 @@ class RearrangePickReward(MyMeasure):
     prev_dist_to_goal: float
     cls_uuid = "rearrange_pick_reward"
 
-    def reset_metric(self, *args, task: RearrangeTask, **kwargs):
+    def reset_metric(self, *args, task: RearrangeTask, early_terminate: bool=True, **kwargs):
         if not kwargs.get("no_dep", False):
             task.measurements.check_measure_dependencies(
                 self.uuid,
@@ -77,7 +77,7 @@ class RearrangePickReward(MyMeasure):
         self.prev_dist_to_goal = None
         self.update_metric(*args, task=task, **kwargs)
 
-    def update_metric(self, *args, task: RearrangeTask, **kwargs):
+    def update_metric(self, *args, task: RearrangeTask, early_terminate: bool=True, **kwargs):
         measures = task.measurements.measures
         gripper_to_obj_dist = measures[
             GripperToObjectDistance.cls_uuid
@@ -85,8 +85,10 @@ class RearrangePickReward(MyMeasure):
         gripper_to_resting_dist = measures[
             GripperToRestingDistance.cls_uuid
         ].get_metric()
-        gripper_status = measures[GripperStatusMeasure.cls_uuid].status
-        # print("gripper_status", gripper_status)
+        if GripperStatusMeasure.cls_uuid in measures:
+            gripper_status = measures[GripperStatusMeasure.cls_uuid].status
+        else:
+            gripper_status = measures[GripperStatusMeasureV1.cls_uuid].status
 
         reward = 0.0
 
@@ -95,10 +97,11 @@ class RearrangePickReward(MyMeasure):
             self.prev_dist_to_goal = gripper_to_resting_dist
         elif gripper_status == GripperStatus.PICK_WRONG:
             reward -= self._config.PICK_PENALTY
-            task._is_episode_active = False
-            task._is_episode_truncated = self._config.get(
-                "TRUNCATE_PICK_WRONG", False
-            )
+            if early_terminate:
+                task._is_episode_active = False
+                task._is_episode_truncated = self._config.get(
+                    "TRUNCATE_PICK_WRONG", False
+                )
         elif gripper_status == GripperStatus.NOT_HOLDING:
             if self._config.USE_DIFF:
                 if self.prev_dist_to_goal is None:
@@ -112,8 +115,9 @@ class RearrangePickReward(MyMeasure):
                     if diff_thresh > 0 and np.abs(diff_dist) > diff_thresh:
                         diff_dist = 0.0
                         reward -= self._config.DIFF_PENALTY
-                        task._is_episode_active = False
-                        task._is_episode_truncated = False
+                        if early_terminate:
+                            task._is_episode_active = False
+                            task._is_episode_truncated = False
 
                 dist_reward = diff_dist * self._config.DIST_REWARD
             else:
@@ -138,12 +142,19 @@ class RearrangePickReward(MyMeasure):
             self.prev_dist_to_goal = gripper_to_resting_dist
         elif gripper_status == GripperStatus.HOLDING_WRONG:
             raise RuntimeError()
+            reward -= self._config.DROP_PENALTY
+            # if early_terminate:
+            #     task._is_episode_active = False
+            #     task._is_episode_truncated = self._config.get(
+            #         "TRUNCATE_DROP", False
+            #     )
             # pass
         elif gripper_status == GripperStatus.DROP:
             reward -= self._config.DROP_PENALTY
-            task._is_episode_active = False
-            task._is_episode_truncated = self._config.get(
-                "TRUNCATE_DROP", False
-            )
+            if early_terminate:
+                task._is_episode_active = False
+                task._is_episode_truncated = self._config.get(
+                    "TRUNCATE_DROP", False
+                )
 
         self._metric = reward

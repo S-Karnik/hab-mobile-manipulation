@@ -111,6 +111,10 @@ TASK:
     UUID: "place_goal_at_gripper"
     TYPE: PlaceGoalSensor
     FRAME: "gripper"
+  ObjectOrientationSensor:
+    UUID: "object_orientation"
+    TYPE: ObjectOrientationSensor
+    FRAME: "gripper"
   PlaceGoalSensor2:
     UUID: "place_goal_at_base"
     TYPE: PlaceGoalSensor

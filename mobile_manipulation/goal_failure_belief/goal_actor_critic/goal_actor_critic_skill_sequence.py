@@ -24,6 +24,7 @@ import os
 import random
 import time
 from typing import Dict
+from collections import OrderedDict
 
 from gym import spaces
 from habitat import Config, RLEnv, logger
@@ -46,10 +47,14 @@ from mobile_manipulation.utils.env_utils import (
 from habitat_baselines.common.tensorboard_utils import TensorboardWriter
 from mobile_manipulation.utils.wrappers import HabitatActionWrapperV1
 from mobile_manipulation.methods.vec_skill import CompositeSkill
+from mobile_manipulation.common.registry import (
+    vmm_registry as my_registry,
+)
 
+TASK_SEQ_LENGTH = 8
 GOAL_SIZE = 3
-DENSE_TASK_REWARD = 1.0
-FINAL_TASK_REWARD = 0.0
+DENSE_TASK_REWARD = 5.0
+FINAL_TASK_REWARD = 10.0
 
 class TrainGoalActorCritic:
 
@@ -64,7 +69,7 @@ class TrainGoalActorCritic:
     goal_dist_coef: np.float32
     gpu_id: int
     
-    def __init__(self, composite_task_config, skill_config, seed=0, goal_dist_coef=0.001, gpu_id=0) -> None:
+    def __init__(self, composite_task_config, skill_config, seed=0, goal_dist_coef=0.1, gpu_id=0) -> None:
         self._composite_task_config = composite_task_config
         self._skill_config = skill_config
         self._skill_sequence = composite_task_config.SOLUTION.SKILL_SEQUENCE
@@ -74,8 +79,8 @@ class TrainGoalActorCritic:
         self.timer = Timer()  # record fine-grained scopes
         current_file_path = os.path.abspath(__file__)
         parent_dir = os.path.abspath(os.path.join(current_file_path, os.pardir))
-        self.checkpoint_dir = os.path.join(parent_dir, f'{self._prefix}-models-{seed}-alt')
-        self.tensorboard_dir = os.path.join(parent_dir, f'{self._prefix}-tensorboard-{seed}-alt')
+        self.checkpoint_dir = os.path.join(parent_dir, f'{self._prefix}-models-{seed}-goal-32-batch-256-1-5-std')
+        self.tensorboard_dir = os.path.join(parent_dir, f'{self._prefix}-tensorboard-{seed}-goal-32-batch-256-1-5-std')
         self.seed = int(seed)
         if not os.path.exists(self.checkpoint_dir):
             os.mkdir(self.checkpoint_dir)
@@ -84,6 +89,12 @@ class TrainGoalActorCritic:
         self.goal_dist_coef = goal_dist_coef
         self.gpu_id = gpu_id
         print("initialized trainer")
+
+    def to_device(self, tensor_dict, device: torch.device):
+        """Send a TensorDict to a given device."""
+        if isinstance(tensor_dict, torch.Tensor):
+            return tensor_dict.to(device)
+        return {key: tensor.to(device) for key, tensor in tensor_dict.items()}
 
     def summarize(self, losses: Dict[str, float], metrics: Dict[str, float]):
         """Summarize scalars in tensorboard."""
@@ -194,7 +205,8 @@ class TrainGoalActorCritic:
             auto_reset_done=auto_reset_done,
             wrappers=[HabitatActionWrapperV1],
         )
-        self._base_policies = [CompositeSkill(self._composite_task_config.SOLUTION, self.envs, i) for i in range(self.envs.num_envs)]
+        self._saved_actor_critics = {}
+        self._base_policies = [CompositeSkill(self._composite_task_config.SOLUTION, self.envs, i, self._saved_actor_critics) for i in range(self.envs.num_envs)]
         for i in range(self.envs.num_envs):
             self._base_policies[i].to(self.device)
             
@@ -212,9 +224,7 @@ class TrainGoalActorCritic:
             if "rgb" in sensor:
                 del obs_space.spaces[sensor]
         self.obs_space = obs_space
-        self.obs_space["next_skill"] = spaces.Box(0, 1, (len(self._skill_sequence),), np.int32)
-        self.obs_space["place_goal"] = spaces.Box(-np.inf, np.inf, (GOAL_SIZE,), np.float32)
-        self.obs_space["pick_goal"] = spaces.Box(-np.inf, np.inf, (GOAL_SIZE,), np.float32)
+        self.obs_space["next_skill"] = spaces.Box(0, 1, (TASK_SEQ_LENGTH,), np.int32)
 
     def _init_action_space(self):
         self.action_space = spaces.Box(-np.inf, np.inf, (3,), np.float32)
@@ -330,6 +340,12 @@ class TrainGoalActorCritic:
         for i in range(len(config_stage_aliases)):
             config_stage_alias_dict[config_stage_aliases[i]].append(config_stages[i])
         self._config_stage_alias_dict = config_stage_alias_dict
+        self._positions_in_skill_seq = []
+        j = 0
+        for i, skill_name in enumerate(self._skill_sequence):
+            self._positions_in_skill_seq.append(min(j, TASK_SEQ_LENGTH-1))
+            if skill_name in self._config_stage_alias_dict:
+                j += 1
 
     def _init_rollouts(self):
         self._obs_batching_cache = ObservationBatchingCache()
@@ -341,11 +357,15 @@ class TrainGoalActorCritic:
                 if "rgb" in key:
                     del observations[i][key]
             self._base_policies[i].reset(observations[i])
-            observations[i]["next_skill"] = np.zeros(len(self._skill_sequence))
-            observations[i]["next_skill"][self._base_policies[i]._skill_idx] = 1
-            observations[i]["place_goal"] = observations[i]["place_goal_at_base"]
-            observations[i]["pick_goal"] = observations[i]["pick_goal_at_base"]
+            # import pdb; pdb.set_trace()
+            observations[i]["next_skill"] = np.zeros(TASK_SEQ_LENGTH)
+            observations[i]["next_skill"][self._positions_in_skill_seq[self._base_policies[i]._skill_idx]] = 1
         self._stage_successes = np.zeros(self.envs.num_envs)
+        self._entropies = np.zeros(self.envs.num_envs)
+        self._max_entropies = 0
+        self._sum_final_entropies = 0
+        self._num_steps_per_env = np.zeros(self.envs.num_envs)
+        self._num_completed_envs = 0
         batch = batch_obs(
             observations, device=self.device, cache=self._obs_batching_cache
         )
@@ -473,12 +493,30 @@ class TrainGoalActorCritic:
     #     for i in range(self.envs.num_envs):
     #         self._last_obs[i] = self.envs.call_at(i, "set_goal", {"goal_residual": goal_residuals[i].cpu().numpy(), "current_obs": self._last_obs[i]})
     
+    def act_in_parallel_multiprocessing(self, i_env, base_policy, last_obs):
+        out = base_policy.act(last_obs[i_env])
+        entropy = 0 if "entropy" not in out else out["entropy"].item()
+        return (i_env, out, entropy)
+
+    # Parallelize base_policy.act() with one process per environment index
+    def parallelized_policy_act_multiprocessing(self):
+        actions = []
+        n_envs = self.envs.num_envs
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n_envs) as executor:
+            futures = [executor.submit(self.act_in_parallel_multiprocessing, i_env, self._base_policies[i_env], self._last_obs) for i_env in range(n_envs)]
+            for future in concurrent.futures.as_completed(futures):
+                action = future.result()
+                actions.append(action)
+        actions.sort()
+        _, actions_only, entropies = zip(*actions)
+        return actions_only, entropies
+
     def modify_env_goals(self, goal_residuals):
-        if self.seed == 102:
-            out = self.envs.call(["set_goal"] * self.envs.num_envs, [{"goal_residual": goal_residuals[i].cpu().numpy(), "current_obs": self._last_obs[i]} for i in range(self.envs.num_envs)])
-        else:
-            out = self.envs.call(["set_goal_old"] * self.envs.num_envs, [{"goal_residual": goal_residuals[i].cpu().numpy(), "current_obs": self._last_obs[i]} for i in range(self.envs.num_envs)])
-        self._last_obs = out
+        goal_residuals = goal_residuals.cpu().numpy()        
+        out = self.envs.call(["set_goal"] * self.envs.num_envs, [{"goal_residual": goal_residuals[i], "current_obs": self._last_obs[i]} for i in range(self.envs.num_envs)])
+        last_obs, info = zip(*out)
+        self._last_obs = last_obs
+        return info
 
     def act_in_parallel(self, i_env, base_policy, last_obs):
         out = base_policy.act(last_obs[i_env])
@@ -504,7 +542,7 @@ class TrainGoalActorCritic:
         with self.timer.timeit("sample_goal"):
             step_batch = self.rollouts.buffers[self.rollouts.step_idx]
             output_batch = self._goal_actor_critic.act(step_batch)
-            self.modify_env_goals(output_batch["action"])
+            info = self.modify_env_goals(output_batch["action"])
             # print(self._last_obs)
         
         with self.timer.timeit("update_rollout"):
@@ -520,6 +558,17 @@ class TrainGoalActorCritic:
         with self.timer.timeit("sample_action"):
             # Assume that observations are stored at rollouts in the last step
             actions = self.parallelized_policy_act()
+            # entropies = np.asarray(entropies, dtype=np.float32)
+            # self._entropies += entropies
+            # dist_new_place_goal_at_base = np.zeros(n_envs)
+            # dist_new_pick_goal_at_base = np.zeros(n_envs)
+            # dist_new_place_goal_at_gripper = np.zeros(n_envs)
+            # dist_new_pick_goal_at_gripper = np.zeros(n_envs)
+            # for i_env in range(n_envs):
+            #     dist_new_place_goal_at_base[i_env] = np.sum((info[i_env]["place_goal_at_base"] - self._last_obs[i_env]["place_goal_at_base"])**2)
+            #     dist_new_pick_goal_at_base[i_env] = np.sum((info[i_env]["pick_goal_at_base"] - self._last_obs[i_env]["pick_goal_at_base"])**2)
+            #     dist_new_place_goal_at_gripper[i_env] = np.sum((info[i_env]["place_goal_at_gripper"] - self._last_obs[i_env]["place_goal_at_gripper"])**2)
+            #     dist_new_pick_goal_at_gripper[i_env] = np.sum((info[i_env]["pick_goal_at_gripper"] - self._last_obs[i_env]["pick_goal_at_gripper"])**2)
 
         with self.timer.timeit("step_env"):
             for i_env, action in zip(range(n_envs), actions):
@@ -528,16 +577,15 @@ class TrainGoalActorCritic:
             results = self.envs.wait_step()
             obs, rews, dones, infos = map(list, zip(*results))
             self.num_steps_done += n_envs
-
         with self.timer.timeit("update_info"):
             self._last_obs = obs
-            for i_env in range(n_envs):
-                obs[i_env]["place_goal"] = obs[i_env]["place_goal_at_base"]
-                obs[i_env]["pick_goal"] = obs[i_env]["pick_goal_at_base"]
             stage_successes = np.zeros(n_envs)
             for i_env in range(n_envs):
                 stage_success = infos[i_env]["stage_success"]
                 stage_successes[i_env] = DENSE_TASK_REWARD * np.sum([stage_success[stage] for stage in stage_success])
+                current_skill_name = self._base_policies[i_env].skill_sequence[self._base_policies[i_env]._skill_idx]
+                if not self.is_navigate(current_skill_name) and not self.is_reset_arm(current_skill_name) and not self.is_next_target(current_skill_name):
+                    rews[i_env] -= infos[i_env]["gripper_to_resting_dist"] * 0.1
             diff_stage_successes = stage_successes - self._stage_successes
             self._stage_successes = stage_successes
         
@@ -547,12 +595,12 @@ class TrainGoalActorCritic:
                 for key in updated_obs:
                     if "rgb" in key:
                         del updated_obs[i_env][key]
-                updated_obs[i_env]["next_skill"] = np.zeros(len(self._skill_sequence))
-                updated_obs[i_env]["next_skill"][self._base_policies[i_env]._skill_idx] = 1
+                updated_obs[i_env]["next_skill"] = np.zeros(TASK_SEQ_LENGTH)
+                updated_obs[i_env]["next_skill"][self._positions_in_skill_seq[self._base_policies[i_env]._skill_idx]] = 1
                 reset_env = self._base_policies[i_env].check_if_done(obs[i_env]) and (self._base_policies[i_env]._skill_idx == len(self._skill_sequence) - 1)
                 if self._base_policies[i_env]._skill_idx > 0:
-                    current_skill_name = self._base_policies[i_env].skill_sequence[self._base_policies[i_env]._skill_idx]
-                    if (current_skill_name == "NextTarget") and (self._stage_successes[i_env] == 0):
+                    prev_skill_name = self._base_policies[i_env].skill_sequence[self._base_policies[i_env]._skill_idx-1]
+                    if (prev_skill_name == "NextTarget") and (self._stage_successes[i_env] < DENSE_TASK_REWARD * 4):
                         reset_env = True
                 if reset_env:
                     dones[i_env] = True
@@ -593,27 +641,37 @@ class TrainGoalActorCritic:
                 )
                 next_value = self._goal_actor_critic.get_value(next_step_batch)
 
+            self._num_steps_per_env += 1
+
             for i_env in range(n_envs):
                 if dones[i_env]:
                     ob = self.envs.wait_reset_at(i_env)
                     self._last_obs[i_env] = ob
                     self._base_policies[i_env].reset(ob)
                     updated_obs[i_env] = ob
-                    ob["place_goal"] = self.envs.call_at(i_env, "get_original_place_goal", {})
-                    ob["pick_goal"] = self.envs.call_at(i_env, "get_original_pick_goal", {})
-                    updated_obs[i_env]["next_skill"] = np.zeros(len(self._skill_sequence))
-                    updated_obs[i_env]["next_skill"][self._base_policies[i_env]._skill_idx] = 1
+                    updated_obs[i_env]["next_skill"] = np.zeros(TASK_SEQ_LENGTH)
+                    updated_obs[i_env]["next_skill"][self._positions_in_skill_seq[self._base_policies[i_env]._skill_idx]] = 1
+                    self._num_completed_envs += 1
+                    self._sum_final_entropies += self._entropies[i_env] / self._num_steps_per_env[i_env]
+                    self._num_steps_per_env[i_env] = 0
+                    self._entropies[i_env] = 0
                     if self.seed == 102 and (self._stage_successes[i_env] == DENSE_TASK_REWARD * len(infos[i_env]["stage_success"])):
                         diff_stage_successes[i_env] += FINAL_TASK_REWARD
                     self._stage_successes[i_env] = 0
-                    
-        # -------------------------------------------------------------------------- #
         
+        # -------------------------------------------------------------------------- #
+        # rews += diff_stage_successes - 0.001 * dist_new_place_goal_at_base \
+        #                             - 0.001 * dist_new_pick_goal_at_base \
+        #                             - 0.001 * dist_new_place_goal_at_gripper \
+        #                             - 0.001 * dist_new_pick_goal_at_gripper
+        
+        
+        rews = diff_stage_successes
         with self.timer.timeit("batch_obs"):
             batch = batch_obs(
                 updated_obs, device=self.device, cache=self._obs_batching_cache
             )
-            rewards = torch.tensor(diff_stage_successes, dtype=torch.float).unsqueeze(1)
+            rewards = torch.tensor(rews, dtype=torch.float).unsqueeze(1)
             done_masks = torch.tensor(dones, dtype=torch.bool).unsqueeze(1)
             not_done_masks = torch.logical_not(done_masks)
             truncated_masks = torch.tensor(
@@ -703,6 +761,7 @@ class TrainGoalActorCritic:
 
     def update(self):
         """PPO update."""
+        self.rollouts.to("cpu")
         ppo_cfg = self._skill_config.RL.PPO
         if ppo_cfg.use_linear_clip_decay:
             clip_param = ppo_cfg.clip_param * max(1 - self.percent_done(), 0.0)
@@ -712,6 +771,8 @@ class TrainGoalActorCritic:
 
         with torch.no_grad():
             step_batch = self.rollouts.buffers[self.rollouts.step_idx]
+            for key in step_batch:
+                step_batch[key] = self.to_device(step_batch[key], self.device)
             next_value = self._goal_actor_critic.get_value(step_batch)
 
             # NOTE(jigu): next_value will be stored in the buffer.
@@ -736,7 +797,7 @@ class TrainGoalActorCritic:
         for i_epoch in range(ppo_epoch):
             if ppo_cfg.use_recurrent_generator:
                 data_generator = self.rollouts.recurrent_generator(
-                    advantages, ppo_cfg.num_mini_batch
+                    advantages, 8
                 )
             else:
                 data_generator = self.rollouts.feed_forward_generator(
@@ -744,6 +805,8 @@ class TrainGoalActorCritic:
                 )
 
             for batch in data_generator:
+                for key in batch:
+                    batch[key] = self.to_device(batch[key], self.device)
                 outputs = self._goal_actor_critic.evaluate_actions(
                     batch, batch["actions"]
                 )
@@ -772,11 +835,12 @@ class TrainGoalActorCritic:
                     )
                 else:
                     value_loss = 0.5 * (batch["returns"] - values).pow(2)
-                total_num_observations = len(batch["observations"]["is_grasped"])
-                num_grasped = torch.sum(batch["observations"]["is_grasped"])
+                grasped_obs = batch["observations"]["is_grasped"].detach()
+                total_num_observations = len(grasped_obs)
+                num_grasped = torch.sum(grasped_obs)
                 num_not_grasped = total_num_observations - num_grasped
-                pick_goal_dist_loss = self.goal_dist_coef * (torch.logical_not(batch["observations"]["is_grasped"]) * (batch["actions"]).pow(2)).sum() / (num_not_grasped + 1e-10)
-                place_goal_dist_loss = self.goal_dist_coef * (batch["observations"]["is_grasped"] * (batch["actions"])).pow(2).sum() / (num_grasped + 1e-10)
+                pick_goal_dist_loss =  (torch.logical_not(grasped_obs) * (batch["actions"]).pow(2)).sum() / (num_not_grasped + 1e-10)
+                place_goal_dist_loss = (grasped_obs * (batch["actions"])).pow(2).sum() / (num_grasped + 1e-10)
                 action_loss = action_loss.mean()
                 value_loss = value_loss.mean()
                 dist_entropy = dist_entropy.mean()
@@ -793,11 +857,11 @@ class TrainGoalActorCritic:
                 num_samples_epoch[i_epoch] += num_clipped.size(0)
 
                 total_loss = (
-                    0.1 * pick_goal_dist_loss 
-                    + 0.1 * place_goal_dist_loss
+                    self.goal_dist_coef * pick_goal_dist_loss 
+                    + self.goal_dist_coef * place_goal_dist_loss
                     + value_loss * ppo_cfg.value_loss_coef
                     + action_loss
-                    - dist_entropy * ppo_cfg.entropy_coef
+                    - dist_entropy * 0.01
                 )
                 total_loss.backward()
 
@@ -814,12 +878,13 @@ class TrainGoalActorCritic:
                 action_loss_epoch += action_loss.item()
                 dist_entropy_epoch += dist_entropy.item()
                 num_updates += 1
+                del batch
 
         pick_loss_epoch /= num_updates
         place_loss_epoch /= num_updates
         value_loss_epoch /= num_updates
         action_loss_epoch /= num_updates
-        dist_entropy_epoch /= num_updates
+        
 
         loss_dict = dict(
             pick_loss=pick_loss_epoch,
@@ -837,4 +902,5 @@ class TrainGoalActorCritic:
             metric_dict[f"clip_ratio_{i_epoch}"] = clip_ratio
 
         self.num_updates_done += 1
+        self.rollouts.to(self.device)
         return loss_dict, metric_dict

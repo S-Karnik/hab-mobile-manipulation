@@ -1,0 +1,37 @@
+__BASE__: "{fileDirname}/base.yaml"
+BASE_TASK_CONFIG_PATH: "configs/rearrange/tasks/nav_v0.yaml"
+
+TASK_CONFIG:
+  TASK:
+    SUB_TASKS:
+      - pick
+      - place
+
+SENSORS:
+  - "HEAD_DEPTH_SENSOR"
+
+RL:
+  ACTION_NAME: "BaseDiscVelAction"
+  REWARD_MEASURES:
+    - "rearrange_nav_reward"
+  SUCCESS_MEASURE: rearrange_nav_success
+  SUCCESS_REWARD: 2.5
+  SLACK_REWARD: -0.002
+  SUCCESS_ON_STOP: True
+
+  POLICY:
+    name: BilinearCRPolicy
+    actor_type: "categorical"
+    BilinearCRNet:
+      rgb_uuids: []
+      depth_uuids:
+        - "robot_head_depth"
+      goal_dep_state_uuids:
+        - "nav_goal_at_base"
+      goal_ind_state_uuids: []
+      hidden_size: 256
+      state_hidden_sizes: []
+      rnn_hidden_size: 128
+    
+    CATEGORICAL_ACTOR:
+      pre_bilinear_size: 64

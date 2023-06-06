@@ -1,0 +1,38 @@
+__BASE__: "{fileDirname}/base.yaml"
+BASE_TASK_CONFIG_PATH: "configs/rearrange/tasks/close_drawer_v0.yaml"
+
+SENSORS:
+  - "HEAD_DEPTH_SENSOR"
+  - "ARM_DEPTH_SENSOR"
+
+TRAINER_NAME: "bilinear-ppo-v0"
+
+RL:
+  ACTION_NAME: "ArmGripperAction2"
+  REWARD_MEASURES:
+    - "rearrange_set_reward"
+    - "invalid_grasp_penalty"
+  SUCCESS_MEASURE: rearrange_set_success
+  SUCCESS_REWARD: 2.5
+  SLACK_REWARD: 0.0
+
+  POLICY:
+    name: BilinearCRPolicy
+    BilinearCRNet:
+      rgb_uuids: []
+      depth_uuids:
+        - "robot_head_depth"
+        - "robot_arm_depth"
+      goal_dep_state_uuids:
+        - "pick_goal_at_gripper"
+        - "pick_goal_at_base"
+      goal_ind_state_uuids:
+        - "arm_joint_pos"
+        - "is_grasped"
+        - "gripper_pos_at_base"
+      hidden_size: 256
+      state_hidden_sizes: []
+      rnn_hidden_size: 128
+    GAUSSIAN_ACTOR:
+      std_init_bias: -1.0
+      pre_bilinear_size: 64

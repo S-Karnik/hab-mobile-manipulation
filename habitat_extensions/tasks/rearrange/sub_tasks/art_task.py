@@ -116,9 +116,12 @@ class SetArticulatedObjectTask(RearrangeTask):
         # NOTE(jigu): p-viz-plan first compute it and then set art state
         look_at_pos = np.array(T.translation, dtype=np.float32)
 
-        pos_noise = self._config.get("BASE_NOISE", 0.05)
-        ori_noise = self._config.get("BASE_ANGLE_NOISE", 0.15)
-
+        pos_noise = self._config.get("OVERRIDE_BASE_NOISE", None)
+        if pos_noise is None:
+            pos_noise = self._config.get("BASE_NOISE", 0.05)
+        ori_noise = self._config.get("OVERRIDE_BASE_ANGLE_NOISE", None)
+        if ori_noise is None:
+            ori_noise = self._config.get("BASE_ANGLE_NOISE", 0.15)
         # Sample collision-free state
         for i in range(max_trials):
             self._initialize_ee_pos()

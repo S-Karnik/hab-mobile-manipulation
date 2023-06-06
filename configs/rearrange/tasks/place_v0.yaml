@@ -1,13 +1,15 @@
 __BASE__: "{fileDirname}/base.yaml"
 
 ENVIRONMENT:
-  MAX_EPISODE_STEPS: 200
+  MAX_EPISODE_STEPS: 500
 
 TASK:
   TYPE: RearrangePlaceTask-v0
   BASE_NOISE: 0.1
   BASE_ANGLE_NOISE: 0.25
-  
+  # OVERRIDE_BASE_NOISE: 0.7
+  # OVERRIDE_BASE_ANGLE_NOISE: 0.75
+
   FRIDGE_INIT_RANGE: [1.5, 2.35]
   DRAWER_INIT_RANGE: [0.4, 0.5]
   USE_CACHE: False
@@ -29,6 +31,7 @@ TASK:
     - IsGraspedSensor
     - PlaceGoalSensor
     - PlaceGoalSensor2
+    - ObjectOrientationSensor
 
   MEASUREMENTS:
     - ObjectToGoalDistance
@@ -38,8 +41,8 @@ TASK:
     - ForcePenalty
     - InvalidGraspPenalty
     - PlaceObjectSuccess
-    - RearrangePlaceSuccess
     - RearrangePlaceReward
+    - RearrangePlaceSuccess
   ObjectToGoalDistance:
     TYPE: ObjectToGoalDistance
   GripperToRestingDistance:
@@ -54,7 +57,7 @@ TASK:
     TYPE: ForcePenalty
     FORCE_PENALTY: 0.001
     MAX_FORCE_PENALTY: 0.2
-    MAX_ACCUM_FORCE: 7500.0
+    MAX_ACCUM_FORCE: -1.0
     MAX_ACCUM_FORCE_PENALTY: 1.0
   InvalidGrasp:
     TYPE: InvalidGrasp
@@ -68,10 +71,17 @@ TASK:
   RearrangePlaceSuccess:
     TYPE: RearrangePlaceSuccess
     THRESHOLD: 0.05
+    OBJ_ROT_THRESHOLD: 0.01
+    RESET_OBJ_MOVEMENT_TIMER: 40
   RearrangePlaceReward:
     TYPE: RearrangePlaceRewardV1
     DIST_REWARD: 4.0
+    STABILITY_REWARD: 1.0
+    ROT_REWARD: 4.0
     USE_DIFF: True
-    RELEASE_REWARD: 1.0
+    HOLDING_THRESHOLD: 0.08
+    RELEASE_REWARD: 10.0
     RELEASE_PENALTY: 1.0
+    ORIENTATION_START_THRESHOLD: 0.2
+    CONTINUED_SUCCESS_REWARD: 0.05
     END_DROP: True

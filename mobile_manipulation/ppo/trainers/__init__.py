@@ -1,1 +1,3 @@
 from .ppo_trainer_v0 import PPOTrainerV0
+from .bilinear_ppo_trainer_v0 import BilinearPPOTrainerV0
+from .skill_goal_bilinear_ppo_trainer_v0 import SkillGoalBilinearPPOTrainerV0

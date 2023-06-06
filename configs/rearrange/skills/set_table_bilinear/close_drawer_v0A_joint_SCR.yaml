@@ -1,0 +1,38 @@
+__BASE__: "{fileDirname}/close_drawer_v0_joint_SCR.yaml"
+BASE_TASK_CONFIG_PATH: "configs/rearrange/tasks/close_drawer_v0A.yaml"
+
+RL:
+  ACTION_NAME: "BaseArmGripperAction2"
+  REWARD_MEASURES:
+    - "rearrange_set_reward"
+    - "invalid_grasp_penalty"
+    - "out_of_region_penalty"
+    - "base_action_penalty"
+
+GOAL:
+  INIT_GRASPED: False
+  TRAINER_NAME: "skill-goal-bilinear-ppo-v0"
+  POLICY:
+    name: BilinearCRPolicy
+    BilinearCRNet:
+      rgb_uuids: []
+      depth_uuids:
+        - "robot_head_depth"
+        - "robot_arm_depth"
+      goal_dep_state_uuids:
+        - "pick_goal_at_gripper"
+        - "pick_goal_at_base"
+      goal_ind_state_uuids:
+        - "arm_joint_pos"
+        - "is_grasped"
+        - "gripper_pos_at_base"
+      hidden_size: 256
+      state_hidden_sizes: []
+      rnn_hidden_size: 128
+    GAUSSIAN_ACTOR:
+      std_init_bias: -1.0
+      pre_bilinear_size: 64
+    BASE_CHECKPOINT_PATH: "data/results/rearrange/skills/set_table_bilinear/close_drawer_v0A_joint_SCR/checkpoints/ckpt.100.pth"
+    CHECKPOINT_FOLDER: "data/results/rearrange/skills/set_table_bilinear/close_drawer_v0A_joint_SCR/goal_checkpoints/"
+    TENSORBOARD_DIR: "data/results/rearrange/skills/set_table_bilinear/close_drawer_v0A_joint_SCR/goal_tb/"
+
