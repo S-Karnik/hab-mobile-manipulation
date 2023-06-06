@@ -174,17 +174,42 @@ class RearrangeRLEnv(RLEnv):
             place_goal = self.task.place_goal
             world_goal = place_goal + goal_residual
             transformed_goal_at_base = self.compute_framed_position(self.task, world_goal, "base")
-            transformed_goal_at_gripper= self.compute_framed_position(self.task, world_goal, "gripper")
+            transformed_goal_at_gripper = self.compute_framed_position(self.task, world_goal, "gripper")
             current_obs["place_goal_at_base"] = transformed_goal_at_base
             current_obs["place_goal_at_gripper"] = transformed_goal_at_gripper
         else:
             pick_goal = self.task.pick_goal
             world_goal = pick_goal + goal_residual
             transformed_goal_at_base = self.compute_framed_position(self.task, world_goal, "base")
-            transformed_goal_at_gripper= self.compute_framed_position(self.task, world_goal, "gripper")
+            transformed_goal_at_gripper = self.compute_framed_position(self.task, world_goal, "gripper")
             current_obs["pick_goal_at_base"] = transformed_goal_at_base
             current_obs["pick_goal_at_gripper"] = transformed_goal_at_gripper
         current_obs["nav_goal_at_base"] = transformed_goal_at_base
+        return current_obs
+    
+    def set_goal_per_skill(self, goal_residual, current_obs, is_grasped=None):
+        if is_grasped is None:
+            is_grasped = self._env._sim.gripper.is_grasped
+        if is_grasped:
+            place_goal = self.task.place_goal
+            world_goal = place_goal + goal_residual
+            transformed_goal_at_base = self.compute_framed_position(self.task, world_goal, "base")
+            transformed_goal_at_gripper = self.compute_framed_position(self.task, world_goal, "gripper")
+            if "place_goal_at_base" in current_obs:
+                current_obs["place_goal_at_base"] = transformed_goal_at_base
+            if "place_goal_at_gripper" in current_obs:
+                current_obs["place_goal_at_gripper"] = transformed_goal_at_gripper
+        else:
+            pick_goal = self.task.pick_goal
+            world_goal = pick_goal + goal_residual
+            transformed_goal_at_base = self.compute_framed_position(self.task, world_goal, "base")
+            transformed_goal_at_gripper = self.compute_framed_position(self.task, world_goal, "gripper")
+            if "pick_goal_at_base" in current_obs:
+                current_obs["pick_goal_at_base"] = transformed_goal_at_base
+            if "pick_goal_at_gripper" in current_obs:
+                current_obs["pick_goal_at_gripper"] = transformed_goal_at_gripper
+        if "nav_goal_at_base" in current_obs:
+            current_obs["nav_goal_at_base"] = transformed_goal_at_base
         return current_obs
     
     def set_goal_old(self, goal_residual, current_obs):
@@ -244,3 +269,21 @@ class RearrangeRLEnv(RLEnv):
     
     def set_robot_arm_motor_pos(self, arm_motor_pos):
         self._env.sim.robot.arm_motor_pos = arm_motor_pos
+
+    def compute_new_actions(self, action_args, original_categorical_action_log_probs, gaussian_action_residual, categorical_all_log_probs, gaussian_flag, testing=False):
+        if gaussian_flag:
+            action_args = action_args + gaussian_action_residual
+            return action_args
+        x = original_categorical_action_log_probs + categorical_all_log_probs
+        y = np.exp(x)
+        probs = y / np.sum(y)
+        if testing:
+            action_idx = np.argmax(probs)
+        else:
+            action_idx = np.random.choice(len(probs), p=probs)
+        action_args = np.array(action_idx, dtype='long')
+        return action_args
+    
+    def set_early_terminate(self, early_terminate):
+        self.task.set_early_terminate(early_terminate)
+        return

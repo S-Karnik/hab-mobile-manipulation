@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from typing import Dict
+import habitat_sim
 
 import magnum as mn
 import numpy as np
@@ -12,7 +13,6 @@ from habitat.core.simulator import Observations, Sensor, SensorTypes
 
 from .sim import RearrangeSim
 from .task import RearrangeEpisode, RearrangeTask
-
 
 class MySensor(Sensor):
     def __init__(self, *args, sim: RearrangeSim, config: Config, **kwargs):
@@ -185,7 +185,26 @@ class RestingPositionSensor(MySensor):
 
     def get_observation(self, *args, task: RearrangeTask, **kwargs):
         return task.resting_position  # base frame
+    
+import time
+@registry.register_sensor
+class ObjectOrientationSensor(MySensor):
+    cls_uuid = "object_orientation"
 
+    def _get_observation_space(self, *args, **kwargs):
+        return spaces.Box(shape=(3,), low=-1, high=1, dtype=np.float32)
+
+    def get_observation(self, *args, task: RearrangeTask, **kwargs):
+        rigid_object = task.tgt_obj
+        rotation_quaternion = rigid_object.rotation
+        # Define a default vector for orientation extraction
+        default_vector = np.array([0, 0, 1], dtype=np.float32)
+        # Transform the default vector using the rotation quaternion
+        orientation_vector = rotation_quaternion.transform_vector(default_vector)
+        # Normalize the orientation vector
+        orientation_vector /= np.linalg.norm(orientation_vector)
+        # Print the orientation vector
+        return np.asarray([orientation_vector.x, orientation_vector.y, orientation_vector.z])
 
 # ---------------------------------------------------------------------------- #
 # Measure
@@ -335,7 +354,7 @@ class InvalidGraspPenalty(MyMeasure):
         thresh = self._config.get("THRESHOLD", 0.09)
         if self._sim.gripper.is_invalid_grasp(thresh):
             self._metric = -self._config.PENALTY
-            if self._config.END_EPISODE:
+            if self._config.END_EPISODE and not self._config.get("MULTISKILL", False):
                 task._is_episode_active = False
                 task._is_episode_truncated = self._config.get(
                     "TRUNCATE_EPISODE", False
@@ -362,7 +381,7 @@ class InvalidGraspPenaltyV1(MyMeasure):
 
         if self._sim.gripper.is_invalid_grasp(thresh):
             self._metric = -self._config.PENALTY
-            if self._config.END_EPISODE:
+            if self._config.END_EPISODE and not self._config.get("MULTISKILL", False):
                 task._is_episode_active = False
                 task._is_episode_truncated = self._config.get(
                     "TRUNCATE_EPISODE", False
@@ -425,10 +444,11 @@ class ForcePenalty(MyMeasure):
             and accum_force > self._config.MAX_ACCUM_FORCE
         ):
             force_penalty += self._config.MAX_ACCUM_FORCE_PENALTY
-            task._is_episode_active = False
-            task._is_episode_truncated = self._config.get(
-                "TRUNCATE_EPISODE", False
-            )
+            if not self._config.get("MULTISKILL", False):
+                task._is_episode_active = False
+                task._is_episode_truncated = self._config.get(
+                    "TRUNCATE_EPISODE", False
+                )
 
         self._metric = -force_penalty
 
@@ -450,10 +470,11 @@ class CollisionPenalty(MyMeasure):
         if curr_force >= self._config.MAX_FORCE:
             # print("curr_force", curr_force)
             self._metric = -self._config.PENALTY
-            task._is_episode_active = False
-            task._is_episode_truncated = self._config.get(
-                "TRUNCATE_EPISODE", False
-            )
+            if not self._config.get("MULTISKILL", False):
+                task._is_episode_active = False
+                task._is_episode_truncated = self._config.get(
+                    "TRUNCATE_EPISODE", False
+                )
         else:
             self._metric = 0.0
 

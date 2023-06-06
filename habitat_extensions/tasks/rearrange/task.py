@@ -86,6 +86,7 @@ class RearrangeTask(EmbodiedTask):
     _is_episode_truncated: bool
     # should be called for force termination only
     _should_terminate: bool
+    _early_terminate: bool
 
     def overwrite_sim_config(self, sim_config, episode: RearrangeEpisode):
         sim_config.defrost()
@@ -120,6 +121,13 @@ class RearrangeTask(EmbodiedTask):
     @property
     def should_terminate(self):
         return self._should_terminate
+    
+    @property
+    def early_terminate(self):
+        return self._early_terminate
+    
+    def set_early_terminate(self, early_terminate):
+        self._early_terminate = early_terminate
 
     def seed(self, seed: int) -> None:
         # NOTE(jigu): Env will set the seed for random and np.random
@@ -136,7 +144,7 @@ class RearrangeTask(EmbodiedTask):
         self.start_ee_pos = None  # for ee-space controller
         self._target_receptacles = episode.target_receptacles
         self._goal_receptacles = episode.goal_receptacles
-
+        self._early_terminate = False
         self.initialize(episode)
         self._reset_stats()
 

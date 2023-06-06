@@ -5,6 +5,7 @@ import magnum as mn
 import numpy as np
 from gym import spaces
 from habitat import Config
+from habitat.core.embodied_task import Measurements
 from habitat.core.registry import registry
 
 from habitat_extensions.robots.marker import Marker
@@ -188,10 +189,19 @@ class CompositeReward(MyMeasure):
             self._config.MEASUREMENTS, registry.get_measure, self._config
         )
         self._stage_measures = []
-        for stage_measure in self._config.STAGE_MEASURES:
+        for _, stage_measure in self._config.STAGE_MEASURES.items():
             self._stage_measures.append(
                 [self._measures[x] for x in stage_measure]
             )
+        self._stage_measures.append([])
+        self._slack_rewards = []
+        self._marker_threshs = []
+        for _, slack_reward in self._config.SLACK_REWARDS.items():
+            self._slack_rewards.append(slack_reward)
+        self._slack_rewards.append(0)
+        for _, marker_thresh in self._config.MARKER_THRESHOLDS.items():
+            self._marker_threshs.append(marker_thresh)
+        self._marker_threshs.append(0)
 
     def reset_metric(self, *args, task: RearrangeTask, **kwargs):
         # In fact, this reward should be placed at last
@@ -210,7 +220,8 @@ class CompositeReward(MyMeasure):
         self.update_metric(*args, task=task, **kwargs)
 
     def update_metric(self, *args, task: RearrangeTask, **kwargs):
-        measures = task.measurements.measures
+        measurements = task.measurements
+        measures = measurements.measures
         stage_successes = measures[StageSuccess.cls_uuid].get_metric()
         reward = 0.0
 
@@ -223,6 +234,7 @@ class CompositeReward(MyMeasure):
 
         # stage_measure = self._stage_measures[stage_idx]
         stage_measures = self._stage_measures[stage_idx]
+        new_stage = False
 
         if self._stage_idx != stage_idx:
             assert self._stage_idx < stage_idx, (self._stage_idx, stage_idx)
@@ -242,10 +254,12 @@ class CompositeReward(MyMeasure):
             if stage_idx > 0:
                 reward += self._config.STAGE_REWARD
 
+            new_stage = True
+        
         for stage_measure in stage_measures:
-            stage_measure.update_metric(*args, task=task, **kwargs)
+            stage_measure.update_metric(*args, task=task, early_terminate=task.early_terminate and not new_stage, thresh=self._marker_threshs[stage_idx], **kwargs)
             reward += stage_measure.get_metric()
-
+        reward += self._slack_rewards[stage_idx]
         self._metric = reward
 
     def _reset_gs(self, *args, task: RearrangeTask, **kwargs):

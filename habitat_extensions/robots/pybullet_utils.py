@@ -130,6 +130,7 @@ class PybulletRobot:
             target_position,
             targetOrientation=target_orientation,
             physicsClientId=self.client_id,
+            residualThreshold=1e-6,
             maxNumIterations=max_iters,
         )
         return [joint_positions[i] for i in self.joint_indices]
